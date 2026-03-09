@@ -10,8 +10,8 @@
     header { background: #1e3a5f; color: white; padding: 14px 20px; font-size: 16px; font-weight: 600; }
     #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
     .msg { max-width: 75%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
-    .user { align-self: flex-end; background: #1e3a5f; color: white; border-bottom-right-radius: 4px; }
-    .bot  { align-self: flex-start; background: white; border: 1px solid #e0e0e0; border-bottom-left-radius: 4px; }
+    .user  { align-self: flex-end; background: #1e3a5f; color: white; border-bottom-right-radius: 4px; }
+    .bot   { align-self: flex-start; background: white; border: 1px solid #e0e0e0; border-bottom-left-radius: 4px; }
     .error { background: #fff0f0; border-color: #ffcccc; color: #c00; }
     footer { padding: 12px 16px; background: white; border-top: 1px solid #e0e0e0; display: flex; gap: 8px; }
     #input { flex: 1; padding: 10px 14px; border: 1px solid #ccc; border-radius: 8px; font-size: 14px; outline: none; }
@@ -22,15 +22,19 @@
     #setup h2 { font-size: 15px; margin-bottom: 12px; color: #333; }
     #setup input { width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; margin-bottom: 10px; }
     #setup button { width: 100%; }
+    #setup label { font-size: 12px; color: #666; display: block; margin-bottom: 4px; }
   </style>
 </head>
 <body>
   <header>🌿 Birch Benefits – AgencyBloc Assistant</header>
 
   <div id="setup">
-    <h2>Enter your AgencyBloc API Key to get started</h2>
-    <input type="password" id="apiKey" placeholder="Your AgencyBloc API key" />
-    <button onclick="saveKey()">Connect</button>
+    <h2>Enter your AgencyBloc credentials to get started</h2>
+    <label>SID</label>
+    <input type="text" id="sid" placeholder="Your AgencyBloc SID" />
+    <label>API Key</label>
+    <input type="password" id="apiKey" placeholder="Your AgencyBloc API Key" />
+    <button onclick="connect()">Connect</button>
   </div>
 
   <div id="chat" style="display:none"></div>
@@ -41,41 +45,53 @@
   </footer>
 
   <script>
-    let API_KEY = "";
-    let AB_TOKEN = "";
+    let SID = "", KEY = "";
     let history = [];
 
-    const PROXY = "/api/proxy";
-    const AB_BASE = "https://api.agencybloc.com/v1";
+    const PROXY    = "/api/proxy";
+    const AB_BASE  = "https://app.agencybloc.com/api/v1";
 
-    function saveKey() {
-      const k = document.getElementById("apiKey").value.trim();
-      if (!k) return alert("Please enter your API key.");
-      API_KEY = k;
+    function connect() {
+      SID = document.getElementById("sid").value.trim();
+      KEY = document.getElementById("apiKey").value.trim();
+      if (!SID || !KEY) return alert("Please enter both your SID and API Key.");
+
       document.getElementById("setup").style.display = "none";
-      document.getElementById("chat").style.display = "flex";
+      document.getElementById("chat").style.display  = "flex";
       document.getElementById("footer").style.display = "flex";
-      addMsg("bot", "Connected! Authenticating with AgencyBloc...");
-      authenticate();
+
+      // Test credentials with a lightweight call — fetch first page of groups
+      addMsg("bot", "Connecting to AgencyBloc...");
+      testConnection();
     }
 
-    async function authenticate() {
+    async function testConnection() {
       try {
-        const res = await fetch(`${PROXY}?url=${encodeURIComponent(AB_BASE + "/authorize")}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ api_key: API_KEY }).toString()
-        });
-        const data = await res.json();
-        if (data.token || data.access_token) {
-          AB_TOKEN = data.token || data.access_token;
-          addMsg("bot", "✅ Authenticated! You can now query your AgencyBloc data.\n\nTry asking:\n• Show me all groups\n• List individuals added this month\n• Show open leads");
+        const data = await abPost("/groups/list", { pageSize: 1 });
+        if (data.errorCode && data.errorCode !== 0) {
+          addMsg("error", "❌ Auth failed: " + (data.errorMessage || JSON.stringify(data)));
         } else {
-          addMsg("bot error", "❌ Auth failed. Response:\n" + JSON.stringify(data, null, 2));
+          addMsg("bot", "✅ Connected to AgencyBloc!\n\nTry asking:\n• Show me all groups\n• List individuals with last name Smith\n• Show open leads\n• List policies for group XYZ");
         }
       } catch (e) {
-        addMsg("bot error", "❌ Network error during auth: " + e.message);
+        addMsg("error", "❌ Connection error: " + e.message);
       }
+    }
+
+    // Core function — POST to AgencyBloc via proxy, always injects sid+key
+    async function abPost(endpoint, params = {}) {
+      const url = `${AB_BASE}${endpoint}`;
+      const body = new URLSearchParams({ sid: SID, key: KEY, ...params }).toString();
+
+      const res = await fetch(`${PROXY}?url=${encodeURIComponent(url)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body,
+      });
+
+      const text = await res.text();
+      try { return JSON.parse(text); }
+      catch { return { raw: text }; }
     }
 
     async function send() {
@@ -85,20 +101,29 @@
       input.value = "";
       addMsg("user", q);
       document.getElementById("sendBtn").disabled = true;
-
       history.push({ role: "user", content: q });
 
-      // Ask Claude to figure out which AgencyBloc endpoint to call
-      const systemPrompt = `You are a helpful assistant for Birch Benefits, a benefits brokerage. 
-You have access to AgencyBloc's REST API. Given the user's question, respond with ONLY a JSON object:
-{
-  "endpoint": "/v1/groups",       // the AgencyBloc endpoint path
-  "params": { "page": 1 }         // any query params to append
-}
-Available endpoints: /v1/groups, /v1/individuals, /v1/policies, /v1/leads, /v1/activities, /v1/carriers
-If you cannot map the question to an endpoint, return: { "endpoint": null, "answer": "your direct answer here" }`;
+      const systemPrompt = `You are a helpful assistant for Birch Benefits, a benefits brokerage firm.
+You have access to AgencyBloc's REST API. Given the user's question, respond with ONLY a valid JSON object.
+
+Available endpoints and their key params:
+- /groups/list       — pageSize, pageNumber, groupName, groupStatus
+- /individuals/list  — pageSize, pageNumber, lastName, firstName, groupID
+- /leads/list        — pageSize, pageNumber, leadStatus, assignedUserID
+- /policies/list     — pageSize, pageNumber, groupID, individualID, policyStatus, carrierID
+- /activities/list   — pageSize, pageNumber, groupID, individualID, activityType
+- /carriers/list     — pageSize, pageNumber
+
+Respond with:
+{ "endpoint": "/groups/list", "params": { "pageSize": 10 } }
+
+If you cannot map to an endpoint, respond with:
+{ "endpoint": null, "answer": "your plain English answer here" }
+
+Never include sid or key — those are added automatically.`;
 
       try {
+        // Step 1: Ask Claude which endpoint to call
         const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -106,51 +131,61 @@ If you cannot map the question to an endpoint, return: { "endpoint": null, "answ
             model: "claude-sonnet-4-20250514",
             max_tokens: 300,
             system: systemPrompt,
-            messages: history
+            messages: history,
           })
         });
         const claudeData = await claudeRes.json();
-        const raw = claudeData.content?.[0]?.text || "{}";
+        const raw = claudeData.content?.[0]?.text?.trim() || "{}";
 
-        let parsed;
-        try { parsed = JSON.parse(raw); } catch { parsed = { endpoint: null, answer: raw }; }
+        let plan;
+        try {
+          const clean = raw.replace(/```json|```/g, "").trim();
+          plan = JSON.parse(clean);
+        } catch {
+          plan = { endpoint: null, answer: raw };
+        }
 
-        if (!parsed.endpoint) {
-          const answer = parsed.answer || "I couldn't map that to an AgencyBloc query.";
-          addMsg("bot", answer);
-          history.push({ role: "assistant", content: answer });
+        if (!plan.endpoint) {
+          const ans = plan.answer || "I couldn't map that to an AgencyBloc query.";
+          addMsg("bot", ans);
+          history.push({ role: "assistant", content: ans });
           return;
         }
 
-        // Call AgencyBloc via proxy
-        const params = new URLSearchParams({ ...(parsed.params || {}), token: AB_TOKEN });
-        const abUrl = `${AB_BASE}${parsed.endpoint}?${params}`;
+        // Step 2: Call AgencyBloc
+        addMsg("bot", `Querying AgencyBloc: ${plan.endpoint}...`);
+        const abData = await abPost(plan.endpoint, plan.params || {});
 
-        const abRes = await fetch(`${PROXY}?url=${encodeURIComponent(abUrl)}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ token: AB_TOKEN }).toString()
-        });
-        const abData = await abRes.json();
+        if (abData.raw) {
+          addMsg("error", "Unexpected response:\n" + abData.raw.substring(0, 500));
+          return;
+        }
 
-        // Ask Claude to summarize the result
-        const summaryPrompt = `The user asked: "${q}"\n\nAgencyBloc returned this data:\n${JSON.stringify(abData, null, 2).substring(0, 3000)}\n\nSummarize this in plain English for a benefits account manager.`;
-        const sumRes = await fetch("https://api.anthropic.com/v1/messages", {
+        // Step 3: Ask Claude to summarize
+        const summaryRes = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             model: "claude-sonnet-4-20250514",
-            max_tokens: 500,
-            messages: [{ role: "user", content: summaryPrompt }]
+            max_tokens: 800,
+            messages: [{
+              role: "user",
+              content: `The user asked: "${q}"\n\nAgencyBloc returned:\n${JSON.stringify(abData, null, 2).substring(0, 4000)}\n\nSummarize this clearly and concisely for a benefits account manager. Use plain English, no JSON.`
+            }]
           })
         });
-        const sumData = await sumRes.json();
+        const sumData = await summaryRes.json();
         const answer = sumData.content?.[0]?.text || JSON.stringify(abData, null, 2);
+
+        // Remove the "querying..." interim message
+        const chat = document.getElementById("chat");
+        chat.removeChild(chat.lastChild);
+
         addMsg("bot", answer);
         history.push({ role: "assistant", content: answer });
 
       } catch (e) {
-        addMsg("bot error", "Error: " + e.message);
+        addMsg("error", "Error: " + e.message);
       } finally {
         document.getElementById("sendBtn").disabled = false;
       }
@@ -158,8 +193,8 @@ If you cannot map the question to an endpoint, return: { "endpoint": null, "answ
 
     function addMsg(type, text) {
       const chat = document.getElementById("chat");
-      const div = document.createElement("div");
-      div.className = "msg " + (type === "user" ? "user" : type.includes("error") ? "bot error" : "bot");
+      const div  = document.createElement("div");
+      div.className = "msg " + (type === "user" ? "user" : type === "error" ? "bot error" : "bot");
       div.textContent = text;
       chat.appendChild(div);
       chat.scrollTop = chat.scrollHeight;

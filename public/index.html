@@ -51,6 +51,7 @@
     let SID = "", KEY = "";
     let history = [];
     const AB_BASE = "https://app.agencybloc.com/api/v1";
+    const PROXY   = "https://birch-proxy-qtou.vercel.app/api/proxy";
 
     // Pre-fill from localStorage if saved
     const saved = JSON.parse(localStorage.getItem("birch_creds") || "{}");
@@ -83,7 +84,7 @@
 
     async function testConnection() {
       try {
-        const data = await abPost("/groups/list", { pageSize: 1 });
+        const data = await abPost("/groups/search", { limit: 1 });
         if (data.errorCode && data.errorCode !== 0) {
           addMsg("error", "❌ Auth failed: " + (data.errorMessage || JSON.stringify(data)));
         } else {
@@ -97,7 +98,7 @@
     async function abPost(endpoint, params = {}) {
       const url = `${AB_BASE}${endpoint}`;
       const body = new URLSearchParams({ sid: SID, key: KEY, ...params }).toString();
-      const res = await fetch(`/api/proxy?url=${url}`, {
+      const res = await fetch(`${PROXY}?url=${encodeURIComponent(url)}`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body,
@@ -107,7 +108,7 @@
     }
 
     async function claudeCall(payload) {
-      const res = await fetch("/api/claude", {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -128,15 +129,15 @@
 You have access to AgencyBloc's REST API. Given the user's question, respond with ONLY a valid JSON object.
 
 Available endpoints and their key params:
-- /groups/list       — pageSize, pageNumber, groupName, groupStatus
-- /individuals/list  — pageSize, pageNumber, lastName, firstName, groupID
-- /leads/list        — pageSize, pageNumber, leadStatus, assignedUserID
-- /policies/list     — pageSize, pageNumber, groupID, individualID, policyStatus, carrierID
-- /activities/list   — pageSize, pageNumber, groupID, individualID, activityType
-- /carriers/list     — pageSize, pageNumber
+- /groups/search      — limit, groupName, type, fedTaxID, businessPhone, updatedDTM
+- /individuals/search — limit, lastName, firstName, groupID
+- /leads/search       — limit, leadStatus, assignedUserID
+- /policies/search    — limit, groupID, individualID, policyStatus, carrierID
+- /activities/search  — limit, groupID, individualID, activityType
+- /carriers/search    — limit
 
 Respond with ONLY this JSON, no other text:
-{ "endpoint": "/groups/list", "params": { "pageSize": 25 } }
+{ "endpoint": "/groups/search", "params": { "limit": 25 } }
 
 If you cannot map to an endpoint, respond with:
 { "endpoint": null, "answer": "your plain English answer here" }

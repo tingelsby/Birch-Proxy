@@ -1,3 +1,5 @@
+
+   
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -45,11 +47,17 @@
   </footer>
 
   <script>
-    let SID = "", KEY = "";
+    let SID = "", KEY = "", ANTHROPIC_KEY = "";
     let history = [];
 
     const PROXY    = "/api/proxy";
     const AB_BASE  = "https://app.agencybloc.com/api/v1";
+
+    // Load Anthropic key before allowing connect
+    const configReady = fetch("/api/config")
+      .then(r => r.json())
+      .then(d => { ANTHROPIC_KEY = d.anthropicKey; })
+      .catch(() => {});
 
     function connect() {
       SID = document.getElementById("sid").value.trim();
@@ -126,7 +134,7 @@ Never include sid or key — those are added automatically.`;
         // Step 1: Ask Claude which endpoint to call
         const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
           body: JSON.stringify({
             model: "claude-sonnet-4-20250514",
             max_tokens: 300,
@@ -164,7 +172,7 @@ Never include sid or key — those are added automatically.`;
         // Step 3: Ask Claude to summarize
         const summaryRes = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
           body: JSON.stringify({
             model: "claude-sonnet-4-20250514",
             max_tokens: 800,

@@ -1,5 +1,3 @@
-
-   
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -25,6 +23,7 @@
     #setup input { width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; margin-bottom: 10px; }
     #setup button { width: 100%; }
     #setup label { font-size: 12px; color: #666; display: block; margin-bottom: 4px; }
+    #forget { background: none; color: #999; font-size: 12px; padding: 4px 8px; border: 1px solid #ddd; margin-top: 8px; }
   </style>
 </head>
 <body>
@@ -37,40 +36,49 @@
     <label>API Key</label>
     <input type="password" id="apiKey" placeholder="Your AgencyBloc API Key" />
     <button onclick="connect()">Connect</button>
+    <br/>
+    <button id="forget" onclick="forgetCreds()" style="display:none">Forget saved credentials</button>
   </div>
 
   <div id="chat" style="display:none"></div>
 
   <footer style="display:none" id="footer">
-    <input id="input" placeholder="Ask something — e.g. 'Show me groups renewing in April'" onkeydown="if(event.key==='Enter')send()" />
+    <input id="input" placeholder="Ask something — e.g. 'Show me groups renewing in May'" onkeydown="if(event.key==='Enter')send()" />
     <button id="sendBtn" onclick="send()">Send</button>
   </footer>
 
   <script>
-    let SID = "", KEY = "", ANTHROPIC_KEY = "";
+    let SID = "", KEY = "";
     let history = [];
+    const AB_BASE = "https://app.agencybloc.com/api/v1";
 
-    const PROXY    = "/api/proxy";
-    const AB_BASE  = "https://app.agencybloc.com/api/v1";
+    // Pre-fill from localStorage if saved
+    const saved = JSON.parse(localStorage.getItem("birch_creds") || "{}");
+    if (saved.sid) document.getElementById("sid").value = saved.sid;
+    if (saved.key) document.getElementById("apiKey").value = saved.key;
+    if (saved.sid && saved.key) document.getElementById("forget").style.display = "inline-block";
 
-    // Load Anthropic key before allowing connect
-    const configReady = fetch("/api/config")
-      .then(r => r.json())
-      .then(d => { ANTHROPIC_KEY = d.anthropicKey; })
-      .catch(() => {});
-
-    function connect() {
+    async function connect() {
       SID = document.getElementById("sid").value.trim();
       KEY = document.getElementById("apiKey").value.trim();
       if (!SID || !KEY) return alert("Please enter both your SID and API Key.");
+
+      // Save to localStorage
+      localStorage.setItem("birch_creds", JSON.stringify({ sid: SID, key: KEY }));
 
       document.getElementById("setup").style.display = "none";
       document.getElementById("chat").style.display  = "flex";
       document.getElementById("footer").style.display = "flex";
 
-      // Test credentials with a lightweight call — fetch first page of groups
       addMsg("bot", "Connecting to AgencyBloc...");
       testConnection();
+    }
+
+    function forgetCreds() {
+      localStorage.removeItem("birch_creds");
+      document.getElementById("sid").value = "";
+      document.getElementById("apiKey").value = "";
+      document.getElementById("forget").style.display = "none";
     }
 
     async function testConnection() {
@@ -79,27 +87,32 @@
         if (data.errorCode && data.errorCode !== 0) {
           addMsg("error", "❌ Auth failed: " + (data.errorMessage || JSON.stringify(data)));
         } else {
-          addMsg("bot", "✅ Connected to AgencyBloc!\n\nTry asking:\n• Show me all groups\n• List individuals with last name Smith\n• Show open leads\n• List policies for group XYZ");
+          addMsg("bot", "✅ Connected to AgencyBloc!\n\nTry asking:\n• Show me all groups\n• List individuals with last name Smith\n• Show open leads\n• What groups renew in May?");
         }
       } catch (e) {
         addMsg("error", "❌ Connection error: " + e.message);
       }
     }
 
-    // Core function — POST to AgencyBloc via proxy, always injects sid+key
     async function abPost(endpoint, params = {}) {
       const url = `${AB_BASE}${endpoint}`;
       const body = new URLSearchParams({ sid: SID, key: KEY, ...params }).toString();
-
-      const res = await fetch(`${PROXY}?url=${encodeURIComponent(url)}`, {
+      const res = await fetch(`/api/proxy?url=${encodeURIComponent(url)}`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body,
       });
-
       const text = await res.text();
-      try { return JSON.parse(text); }
-      catch { return { raw: text }; }
+      try { return JSON.parse(text); } catch { return { raw: text }; }
+    }
+
+    async function claudeCall(payload) {
+      const res = await fetch("/api/claude", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      return res.json();
     }
 
     async function send() {
@@ -122,33 +135,26 @@ Available endpoints and their key params:
 - /activities/list   — pageSize, pageNumber, groupID, individualID, activityType
 - /carriers/list     — pageSize, pageNumber
 
-Respond with:
-{ "endpoint": "/groups/list", "params": { "pageSize": 10 } }
+Respond with ONLY this JSON, no other text:
+{ "endpoint": "/groups/list", "params": { "pageSize": 25 } }
 
 If you cannot map to an endpoint, respond with:
 { "endpoint": null, "answer": "your plain English answer here" }
 
-Never include sid or key — those are added automatically.`;
+Never include sid or key in params.`;
 
       try {
-        // Step 1: Ask Claude which endpoint to call
-        const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 300,
-            system: systemPrompt,
-            messages: history,
-          })
+        const claudeData = await claudeCall({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 300,
+          system: systemPrompt,
+          messages: history,
         });
-        const claudeData = await claudeRes.json();
-        const raw = claudeData.content?.[0]?.text?.trim() || "{}";
 
+        const raw = claudeData.content?.[0]?.text?.trim() || "{}";
         let plan;
         try {
-          const clean = raw.replace(/```json|```/g, "").trim();
-          plan = JSON.parse(clean);
+          plan = JSON.parse(raw.replace(/```json|```/g, "").trim());
         } catch {
           plan = { endpoint: null, answer: raw };
         }
@@ -160,8 +166,7 @@ Never include sid or key — those are added automatically.`;
           return;
         }
 
-        // Step 2: Call AgencyBloc
-        addMsg("bot", `Querying AgencyBloc: ${plan.endpoint}...`);
+        addMsg("bot", `Querying AgencyBloc${plan.endpoint}...`);
         const abData = await abPost(plan.endpoint, plan.params || {});
 
         if (abData.raw) {
@@ -169,23 +174,18 @@ Never include sid or key — those are added automatically.`;
           return;
         }
 
-        // Step 3: Ask Claude to summarize
-        const summaryRes = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 800,
-            messages: [{
-              role: "user",
-              content: `The user asked: "${q}"\n\nAgencyBloc returned:\n${JSON.stringify(abData, null, 2).substring(0, 4000)}\n\nSummarize this clearly and concisely for a benefits account manager. Use plain English, no JSON.`
-            }]
-          })
+        const sumData = await claudeCall({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 800,
+          messages: [{
+            role: "user",
+            content: `The user asked: "${q}"\n\nAgencyBloc returned:\n${JSON.stringify(abData, null, 2).substring(0, 4000)}\n\nSummarize this clearly and concisely for a benefits account manager. Use plain English, no JSON.`
+          }]
         });
-        const sumData = await summaryRes.json();
+
         const answer = sumData.content?.[0]?.text || JSON.stringify(abData, null, 2);
 
-        // Remove the "querying..." interim message
+        // Remove interim "Querying..." message
         const chat = document.getElementById("chat");
         chat.removeChild(chat.lastChild);
 

@@ -1,5 +1,10 @@
+// api/agencybloc.js
+// Full AgencyBloc handler — all 13 actions
+// debug-env, simplifyGroup on all-groups, lowercase sid/key throughout
+
 export default async function handler(req, res) {
-  // Debug: test whether Vercel can see env vars
+
+  // Debug: confirm env vars are present (GET /api/agencybloc?action=debug-env)
   if (req.query?.action === "debug-env") {
     return res.status(200).json({
       hasSid: !!process.env.AGENCYBLOC_SID,
@@ -7,122 +12,198 @@ export default async function handler(req, res) {
     });
   }
 
-  // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
-
-  if (req.method !== "POST" && req.method !== "GET") {
-    return res.status(405).json({ error: "Only POST or GET allowed" });
-  }
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
 
   const sid = process.env.AGENCYBLOC_SID;
   const key = process.env.AGENCYBLOC_KEY;
+  if (!sid || !key) return res.status(500).json({ error: "Missing AgencyBloc credentials" });
 
-  if (!sid || !key) {
-    return res.status(500).json({ error: "Missing AgencyBloc credentials" });
-  }
+  const action = req.query.action;
+  const input = req.body || {};
 
-  async function ab(endpoint, body = {}) {
-    const response = await fetch(`https://app.agencybloc.com/api/v1/${endpoint}`, {
+  // Core AgencyBloc fetch helper — always lowercase sid/key
+  const ab = async (endpoint, params = {}) => {
+    const body = new URLSearchParams({ sid, key, ...params });
+    const r = await fetch(`https://app.agencybloc.com/api/v1/${endpoint}`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        ...body,
-        SID: sid,
-        KEY: key,
-      }),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString()
     });
+    const text = await r.text();
+    try { return JSON.parse(text); }
+    catch { return { error: "Invalid JSON from AgencyBloc", raw: text }; }
+  };
 
-    const text = await response.text();
-
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      return {
-        error: "Invalid JSON returned from AgencyBloc",
-        raw: text,
-      };
-    }
-
-    if (!response.ok) {
-      return {
-        error: "AgencyBloc request failed",
-        status: response.status,
-        data,
-      };
-    }
-
-    return data;
-  }
-
-  function simplifyGroup(g) {
-    return {
-      groupId: g.groupID || g.groupId || "",
-      groupName: g.groupName || "",
-      type: g.type || "",
-      status: g.status || "",
-      businessPhone: g.businessPhone || "",
-      fedTaxID: g.fedTaxID || "",
-      detailUrl: g.detail_url || g.detailUrl || "",
-    };
-  }
-
-  const action = req.query?.action || "groups-search";
+  // Simplified group shape for list views
+  const simplifyGroup = (g) => ({
+    groupId: g.groupID || "",
+    groupName: g.groupName || "",
+    type: g.type || "",
+    status: g.status || "",
+    businessPhone: g.businessPhone || "",
+    fedTaxID: g.fedTaxID || "",
+    detailUrl: g.detail_url || ""
+  });
 
   try {
-    // Search groups
-    if (action === "groups-search") {
-      const body = req.body || {};
-      const groups = await ab("groups/search", body);
-      return res.status(200).json(groups);
-    }
+    switch (action) {
 
-    // Get all groups - simplified output for Copilot
-    if (action === "all-groups") {
-      const groups = await ab("groups/search", { limit: 0 });
+      // ── GROUPS ──────────────────────────────────────────────
+      case "groups-search": {
+        const params = { limit: 0 };
+        if (input.groupName) params.groupName = input.groupName;
+        if (input.type) params.type = input.type;
+        if (input.fedTaxID) params.fedTaxID = input.fedTaxID;
+        if (input.businessPhone) params.businessPhone = input.businessPhone;
+        return res.json(await ab("groups/search", params));
+      }
 
-      if (!Array.isArray(groups)) {
-        return res.status(500).json({
-          error: "Unexpected response from AgencyBloc groups/search",
-          data: groups,
+      case "groups-detail": {
+        if (!input.groupID) return res.status(400).json({ error: "groupID required" });
+        return res.json(await ab("groups/detail", {
+          groupID: input.groupID,
+          includeActivities: 1
+        }));
+      }
+
+      // ── INDIVIDUALS ─────────────────────────────────────────
+      case "individuals-search": {
+        const params = { limit: 0 };
+        if (input.firstName) params.firstName = input.firstName;
+        if (input.lastName) params.lastName = input.lastName;
+        if (input.email) params.email = input.email;
+        if (input.groupID) params.groupID = input.groupID;
+        if (input.anyPhone) params.anyPhone = input.anyPhone;
+        return res.json(await ab("individuals/search", params));
+      }
+
+      case "individuals-detail": {
+        if (!input.individualID) return res.status(400).json({ error: "individualID required" });
+        return res.json(await ab("individuals/detail", {
+          individualID: input.individualID,
+          includeActivities: 1
+        }));
+      }
+
+      // ── POLICIES ────────────────────────────────────────────
+      case "policies-search": {
+        const params = { limit: 0 };
+        if (input.policyNumber) params.policyNumber = input.policyNumber;
+        if (input.policyCoverageType) params.policyCoverageType = input.policyCoverageType;
+        if (input.carrier) params.carrier = input.carrier;
+        if (input.entityID) params.entityID = input.entityID;
+        if (input.entityTypeID) params.entityTypeID = input.entityTypeID;
+        return res.json(await ab("policies/search", params));
+      }
+
+      case "policies-detail": {
+        if (!input.policyID) return res.status(400).json({ error: "policyID required" });
+        return res.json(await ab("policies/detail", { policyID: input.policyID }));
+      }
+
+      // ── AGENTS / PRODUCERS ───────────────────────────────────
+      case "agents-search": {
+        const params = { limit: 0 };
+        if (input.firstName) params.firstName = input.firstName;
+        if (input.lastName) params.lastName = input.lastName;
+        if (input.email) params.email = input.email;
+        return res.json(await ab("agents/search", params));
+      }
+
+      case "agents-detail": {
+        if (!input.agentID) return res.status(400).json({ error: "agentID required" });
+        return res.json(await ab("agents/detail", {
+          agentID: input.agentID,
+          includeActivities: 1
+        }));
+      }
+
+      // ── CARRIERS ─────────────────────────────────────────────
+      case "carriers-search": {
+        const params = { limit: 0 };
+        if (input.carrierName) params.carrierName = input.carrierName;
+        return res.json(await ab("carriers/search", params));
+      }
+
+      // ── ACTIVITIES ───────────────────────────────────────────
+      case "activities-list": {
+        if (!input.entityID) return res.status(400).json({ error: "entityID required" });
+        if (!input.entityTypeID) return res.status(400).json({ error: "entityTypeID required" });
+        return res.json(await ab("activities/list", {
+          entityID: input.entityID,
+          entityTypeID: input.entityTypeID
+        }));
+      }
+
+      // ── NOTES & ATTACHMENTS ──────────────────────────────────
+      case "notes-list": {
+        if (!input.entity_ID) return res.status(400).json({ error: "entity_ID required" });
+        if (!input.entity_Type) return res.status(400).json({ error: "entity_Type required" });
+        return res.json(await ab("notes/list", {
+          entity_ID: input.entity_ID,
+          entity_Type: input.entity_Type
+        }));
+      }
+
+      // ── LEADS / SALES RECORDS ────────────────────────────────
+      case "leads-detail": {
+        if (!input.record_id) return res.status(400).json({ error: "record_id required" });
+        return res.json(await ab("salesEnablement/Leads/detail", {
+          record_id: input.record_id
+        }));
+      }
+
+      case "leads-search-phone": {
+        if (!input.PhoneNumberSearchQuery) return res.status(400).json({ error: "PhoneNumberSearchQuery required" });
+        return res.json(await ab("salesEnablement/leads/searchphone", {
+          PhoneNumberSearchQuery: input.PhoneNumberSearchQuery
+        }));
+      }
+
+      // ── CONVENIENCE ACTIONS ──────────────────────────────────
+
+      // Returns simplified group list — optimized for Copilot Studio overview queries
+      case "all-groups": {
+        const groups = await ab("groups/search", { limit: 0 });
+        if (!Array.isArray(groups)) return res.json(groups);
+        return res.json({ count: groups.length, groups: groups.map(simplifyGroup) });
+      }
+
+      // Returns full group detail + notes in one call
+      case "client-snapshot": {
+        if (!input.groupID) return res.status(400).json({ error: "groupID required" });
+        const [detail, notes] = await Promise.all([
+          ab("groups/detail", { groupID: input.groupID, includeActivities: 1 }),
+          ab("notes/list", { entity_ID: input.groupID, entity_Type: "Group" })
+        ]);
+        return res.json({ detail, notes });
+      }
+
+      default:
+        return res.status(400).json({
+          error: `Unknown action: ${action}`,
+          availableActions: [
+            "groups-search", "groups-detail",
+            "individuals-search", "individuals-detail",
+            "policies-search", "policies-detail",
+            "agents-search", "agents-detail",
+            "carriers-search",
+            "activities-list",
+            "notes-list",
+            "leads-detail", "leads-search-phone",
+            "all-groups", "client-snapshot"
+          ]
         });
-      }
-
-      const simplified = groups.map(simplifyGroup);
-
-      return res.status(200).json({
-        count: simplified.length,
-        groups: simplified,
-      });
     }
-
-    // Group detail
-    if (action === "groups-detail") {
-      const body = req.body || {};
-      const groupID = body.groupID;
-
-      if (!groupID) {
-        return res.status(400).json({ error: "Missing groupID" });
-      }
-
-      const detail = await ab("groups/detail", { groupID });
-      return res.status(200).json(detail);
-    }
-
-    return res.status(400).json({ error: "Invalid action" });
   } catch (err) {
-    console.error("AgencyBloc Error:", err);
-    return res.status(500).json({
-      error: "Server error",
-      message: err?.message || "Unknown error",
-    });
+    return res.status(500).json({ error: err.message });
   }
 }
+
+export const config = {
+  api: { bodyParser: { sizeLimit: "2mb" } }
+};

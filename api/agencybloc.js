@@ -166,11 +166,27 @@ export default async function handler(req, res) {
 
       // ── CONVENIENCE ACTIONS ──────────────────────────────────
 
-      // Returns simplified group list — limited to 100 for Copilot Studio
+      // Returns simplified group list — filtered to clients only, matching Power BI logic
       case "all-groups": {
-        const groups = await ab("groups/search", { limit: 100 });
+        const groups = await ab("groups/search", { limit: 0 });
         if (!Array.isArray(groups)) return res.json(groups);
-        return res.json({ count: groups.length, groups: groups.map(simplifyGroup) });
+        const clients = groups.filter(g => {
+          const type = (g.type || "").toLowerCase();
+          const name = (g.groupName || "").toLowerCase();
+          return (
+            type.includes("client") ||
+            type.includes("peo") ||
+            type === "group" ||
+            type === "business" ||
+            type === "company" ||
+            type.includes("llc") ||
+            type.includes("corp") ||
+            type.includes("inc") ||
+            name.includes("evans") ||
+            name.includes("careoperative")
+          ) && !type.includes("prospect");
+        });
+        return res.json({ count: clients.length, groups: clients.map(simplifyGroup) });
       }
 
       // Returns full group detail + notes in one call

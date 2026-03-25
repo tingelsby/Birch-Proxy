@@ -22,7 +22,10 @@ export default async function handler(req, res) {
   const key = process.env.AGENCYBLOC_KEY;
   if (!sid || !key) return res.status(500).json({ error: "Missing AgencyBloc credentials" });
 
-  const action = req.query.action;
+  // Support both query param (?action=) and path-based routing (/api/agencybloc/group-detail)
+  const urlPath = req.url || "";
+  const pathAction = urlPath.split("/api/agencybloc/")[1]?.split("?")[0];
+  const action = pathAction || req.query.action;
   const input = req.body || {};
 
   // Core AgencyBloc fetch helper — always lowercase sid/key

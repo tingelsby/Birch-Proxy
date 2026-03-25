@@ -166,9 +166,9 @@ export default async function handler(req, res) {
 
       // ── CONVENIENCE ACTIONS ──────────────────────────────────
 
-      // Returns simplified group list — optimized for Copilot Studio overview queries
+      // Returns simplified group list — limited to 100 for Copilot Studio
       case "all-groups": {
-        const groups = await ab("groups/search", { limit: 0 });
+        const groups = await ab("groups/search", { limit: 100 });
         if (!Array.isArray(groups)) return res.json(groups);
         return res.json({ count: groups.length, groups: groups.map(simplifyGroup) });
       }

@@ -279,10 +279,10 @@ Rules:
   }
 
   async function callAgencyBloc(action, input) {
-    const resp = await fetch(`${BASE}/agencybloc`, {
+    const resp = await fetch(`${BASE}/agencybloc?action=${encodeURIComponent(action)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, input })
+      body: JSON.stringify(input || {})
     });
     return await resp.json();
   }

@@ -3,211 +3,345 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Birch – AgencyBloc Query</title>
+  <title>Birch – AgencyBloc Assistant</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, sans-serif; background: #f5f5f5; display: flex; flex-direction: column; height: 100vh; }
-    header { background: #1e3a5f; color: white; padding: 14px 20px; font-size: 16px; font-weight: 600; }
-    #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
-    .msg { max-width: 75%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
-    .user  { align-self: flex-end; background: #1e3a5f; color: white; border-bottom-right-radius: 4px; }
-    .bot   { align-self: flex-start; background: white; border: 1px solid #e0e0e0; border-bottom-left-radius: 4px; }
-    .error { background: #fff0f0; border-color: #ffcccc; color: #c00; }
-    footer { padding: 12px 16px; background: white; border-top: 1px solid #e0e0e0; display: flex; gap: 8px; }
-    #input { flex: 1; padding: 10px 14px; border: 1px solid #ccc; border-radius: 8px; font-size: 14px; outline: none; }
-    #input:focus { border-color: #1e3a5f; }
-    button { background: #1e3a5f; color: white; border: none; border-radius: 8px; padding: 10px 18px; font-size: 14px; cursor: pointer; }
-    button:disabled { opacity: 0.5; cursor: default; }
-    #setup { background: white; border: 1px solid #ddd; border-radius: 10px; padding: 20px; margin: 20px; }
-    #setup h2 { font-size: 15px; margin-bottom: 12px; color: #333; }
-    #setup input { width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; margin-bottom: 10px; }
-    #setup button { width: 100%; }
-    #setup label { font-size: 12px; color: #666; display: block; margin-bottom: 4px; }
-    #forget { background: none; color: #999; font-size: 12px; padding: 4px 8px; border: 1px solid #ddd; margin-top: 8px; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f0f2f0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    header {
+      background: #fff;
+      border-bottom: 1px solid #e0e0e0;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .header-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #8EC859;
+    }
+
+    header h1 {
+      font-size: 15px;
+      font-weight: 600;
+      color: #1a1a1a;
+    }
+
+    header span {
+      font-size: 12px;
+      color: #888;
+      margin-left: auto;
+    }
+
+    #chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .msg-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .msg-wrap.user { align-items: flex-end; }
+    .msg-wrap.bot  { align-items: flex-start; }
+
+    .msg-label {
+      font-size: 11px;
+      color: #999;
+      padding: 0 4px;
+    }
+
+    .msg {
+      max-width: 75%;
+      padding: 10px 14px;
+      border-radius: 14px;
+      font-size: 14px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+
+    .msg.user {
+      background: #8EC859;
+      color: #1a3a00;
+      border-bottom-right-radius: 4px;
+    }
+
+    .msg.bot {
+      background: #fff;
+      border: 1px solid #e5e5e5;
+      color: #1a1a1a;
+      border-bottom-left-radius: 4px;
+    }
+
+    .msg.error {
+      background: #fff0f0;
+      border-color: #ffcccc;
+      color: #c00;
+    }
+
+    #chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 0 20px 12px;
+    }
+
+    .chip {
+      font-size: 12px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      border: 1px solid #d0d0d0;
+      background: #fff;
+      color: #555;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .chip:hover { background: #f5f5f5; color: #1a1a1a; }
+
+    footer {
+      padding: 12px 16px;
+      background: #fff;
+      border-top: 1px solid #e0e0e0;
+      display: flex;
+      gap: 8px;
+    }
+
+    #input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      background: #fafafa;
+    }
+
+    #input:focus { border-color: #8EC859; background: #fff; }
+
+    #sendBtn {
+      background: #8EC859;
+      color: #1a3a00;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 18px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    #sendBtn:disabled { opacity: 0.5; cursor: default; }
+
+    .typing {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      padding: 12px 14px;
+    }
+
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #aaa;
+      animation: bounce 1.2s infinite;
+    }
+
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes bounce {
+      0%,80%,100% { transform: translateY(0); }
+      40%          { transform: translateY(-5px); }
+    }
   </style>
 </head>
 <body>
-  <header>🌿 Birch Benefits – AgencyBloc Assistant</header>
 
-  <div id="setup">
-    <h2>Enter your AgencyBloc credentials to get started</h2>
-    <label>SID</label>
-    <input type="text" id="sid" placeholder="Your AgencyBloc SID" />
-    <label>API Key</label>
-    <input type="password" id="apiKey" placeholder="Your AgencyBloc API Key" />
-    <button onclick="connect()">Connect</button>
-    <br/>
-    <button id="forget" onclick="forgetCreds()" style="display:none">Forget saved credentials</button>
-  </div>
+<header>
+  <div class="header-dot"></div>
+  <h1>Birch — AgencyBloc Assistant</h1>
+  <span>birch-proxy-qtou.vercel.app</span>
+</header>
 
-  <div id="chat" style="display:none"></div>
+<div id="chat"></div>
 
-  <footer style="display:none" id="footer">
-    <input id="input" placeholder="Ask something — e.g. 'Show me groups renewing in May'" onkeydown="if(event.key==='Enter')send()" />
-    <button id="sendBtn" onclick="send()">Send</button>
-  </footer>
+<div id="chips">
+  <span class="chip" onclick="useChip(this)">How many clients do we have?</span>
+  <span class="chip" onclick="useChip(this)">Search for a group by name</span>
+  <span class="chip" onclick="useChip(this)">List activities for a client</span>
+  <span class="chip" onclick="useChip(this)">Get policy details</span>
+  <span class="chip" onclick="useChip(this)">Find notes on an account</span>
+</div>
 
-  <script>
-    let SID = "", KEY = "";
-    let history = [];
-    const AB_BASE = "https://app.agencybloc.com/api/v1";
-    const PROXY   = "https://birch-proxy-qtou.vercel.app/api/proxy";
+<footer>
+  <input id="input" placeholder="Ask about a client, group, policy, or activity..." onkeydown="if(event.key==='Enter' && !event.shiftKey) send()" />
+  <button id="sendBtn" onclick="send()">Send</button>
+</footer>
 
-    // Pre-fill from localStorage if saved
-    const saved = JSON.parse(localStorage.getItem("birch_creds") || "{}");
-    if (saved.sid) document.getElementById("sid").value = saved.sid;
-    if (saved.key) document.getElementById("apiKey").value = saved.key;
-    if (saved.sid && saved.key) document.getElementById("forget").style.display = "inline-block";
+<script>
+  const BASE = "https://birch-proxy-qtou.vercel.app/api";
+  let history = [];
 
-    async function connect() {
-      SID = document.getElementById("sid").value.trim();
-      KEY = document.getElementById("apiKey").value.trim();
-      if (!SID || !KEY) return alert("Please enter both your SID and API Key.");
+  const SYSTEM = `You are Birch Assistant, an AI for Birch Benefits LLC connected to AgencyBloc AMS.
 
-      // Save to localStorage
-      localStorage.setItem("birch_creds", JSON.stringify({ sid: SID, key: KEY }));
+When you need AgencyBloc data, respond with ONLY a raw JSON object (no markdown, no explanation) like:
+{"abAction":"groups-search","abInput":{"groupName":"Aclaris"}}
 
-      document.getElementById("setup").style.display = "none";
-      document.getElementById("chat").style.display  = "flex";
-      document.getElementById("footer").style.display = "flex";
+Available actions and their inputs:
+- groups-search: optional groupName, type, fedTaxID
+- groups-detail: required groupID
+- individuals-search: optional firstName, lastName, email, groupID
+- individuals-detail: required individualID
+- policies-search: optional policyNumber, carrier, entityID, entityTypeID
+- policies-detail: required policyID
+- agents-search: optional firstName, lastName, email
+- carriers-search: optional carrierName
+- activities-list: required entityID, entityTypeID (group=1, individual=2)
+- notes-list: required entity_ID, entity_Type ("Group" or "Individual")
+- all-groups: no input needed — returns full client list with count
+- client-snapshot: required groupID — returns group detail + notes in one call
 
-      addMsg("bot", "Connecting to AgencyBloc...");
-      testConnection();
-    }
+Rules:
+- If you need a groupID but only have a name, first do groups-search, then use the ID.
+- When presenting results, be concise and professional. Plain text only, no markdown symbols.
+- For "how many clients" questions, use all-groups.
+- Never guess at IDs — always look them up first.`;
 
-    function forgetCreds() {
-      localStorage.removeItem("birch_creds");
-      document.getElementById("sid").value = "";
-      document.getElementById("apiKey").value = "";
-      document.getElementById("forget").style.display = "none";
-    }
+  function useChip(el) {
+    document.getElementById("input").value = el.textContent;
+    document.getElementById("input").focus();
+  }
 
-    async function testConnection() {
+  function addMsg(type, text) {
+    const chat = document.getElementById("chat");
+    const wrap = document.createElement("div");
+    wrap.className = "msg-wrap " + (type === "user" ? "user" : "bot");
+    const label = document.createElement("div");
+    label.className = "msg-label";
+    label.textContent = type === "user" ? "You" : "Birch Assistant";
+    const msg = document.createElement("div");
+    msg.className = "msg " + (type === "user" ? "user" : type === "error" ? "bot error" : "bot");
+    msg.textContent = text;
+    wrap.appendChild(label);
+    wrap.appendChild(msg);
+    chat.appendChild(wrap);
+    chat.scrollTop = chat.scrollHeight;
+    return msg;
+  }
+
+  function showTyping() {
+    const chat = document.getElementById("chat");
+    const wrap = document.createElement("div");
+    wrap.className = "msg-wrap bot";
+    wrap.id = "typing";
+    const msg = document.createElement("div");
+    msg.className = "msg bot typing";
+    msg.innerHTML = "<div class='dot'></div><div class='dot'></div><div class='dot'></div>";
+    wrap.appendChild(msg);
+    chat.appendChild(wrap);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  function removeTyping() {
+    const t = document.getElementById("typing");
+    if (t) t.remove();
+  }
+
+  async function callClaude(messages) {
+    const resp = await fetch(`${BASE}/claude`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-5",
+        max_tokens: 1000,
+        system: SYSTEM,
+        messages
+      })
+    });
+    const data = await resp.json();
+    return data.content?.[0]?.text || "";
+  }
+
+  async function callAgencyBloc(action, input) {
+    const resp = await fetch(`${BASE}/agencybloc`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, input })
+    });
+    return await resp.json();
+  }
+
+  async function send() {
+    const inputEl = document.getElementById("input");
+    const btn = document.getElementById("sendBtn");
+    const text = inputEl.value.trim();
+    if (!text) return;
+
+    inputEl.value = "";
+    btn.disabled = true;
+    addMsg("user", text);
+    history.push({ role: "user", content: text });
+    showTyping();
+
+    try {
+      let reply = await callClaude(history);
+
+      // Check if Claude wants to call AgencyBloc
+      let parsed = null;
       try {
-        const data = await abPost("/groups/search", { limit: 1 });
-        if (data.errorCode && data.errorCode !== 0) {
-          addMsg("error", "❌ Auth failed: " + (data.errorMessage || JSON.stringify(data)));
-        } else {
-          addMsg("bot", "✅ Connected to AgencyBloc!\n\nTry asking:\n• Show me all groups\n• List individuals with last name Smith\n• Show open leads\n• What groups renew in May?");
-        }
-      } catch (e) {
-        addMsg("error", "❌ Connection error: " + e.message);
-      }
-    }
+        const cleaned = reply.trim().replace(/^```json|```$/g, "").trim();
+        parsed = JSON.parse(cleaned);
+      } catch {}
 
-    async function abPost(endpoint, params = {}) {
-      const url = `${AB_BASE}${endpoint}`;
-      const body = new URLSearchParams({ sid: SID, key: KEY, ...params }).toString();
-      const res = await fetch(`${PROXY}?url=${encodeURIComponent(url)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body,
-      });
-      const text = await res.text();
-      try { return JSON.parse(text); } catch { return { raw: text }; }
-    }
+      if (parsed && parsed.abAction) {
+        history.push({ role: "assistant", content: reply });
 
-    async function claudeCall(payload) {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      return res.json();
-    }
-
-    async function send() {
-      const input = document.getElementById("input");
-      const q = input.value.trim();
-      if (!q) return;
-      input.value = "";
-      addMsg("user", q);
-      document.getElementById("sendBtn").disabled = true;
-      history.push({ role: "user", content: q });
-
-      const systemPrompt = `You are a helpful assistant for Birch Benefits, a benefits brokerage firm.
-You have access to AgencyBloc's REST API. Given the user's question, respond with ONLY a valid JSON object.
-
-Available endpoints and their key params:
-- /groups/search      — limit, groupName, type, fedTaxID, businessPhone, updatedDTM
-- /individuals/search — limit, lastName, firstName, groupID
-- /leads/search       — limit, leadStatus, assignedUserID
-- /policies/search    — limit, groupID, individualID, policyStatus, carrierID
-- /activities/search  — limit, groupID, individualID, activityType
-- /carriers/search    — limit
-
-Respond with ONLY this JSON, no other text:
-{ "endpoint": "/groups/search", "params": { "limit": 25 } }
-
-If you cannot map to an endpoint, respond with:
-{ "endpoint": null, "answer": "your plain English answer here" }
-
-Never include sid or key in params.`;
-
-      try {
-        const claudeData = await claudeCall({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 300,
-          system: systemPrompt,
-          messages: history,
-        });
-
-        const raw = claudeData.content?.[0]?.text?.trim() || "{}";
-        let plan;
+        let abResult;
         try {
-          plan = JSON.parse(raw.replace(/```json|```/g, "").trim());
-        } catch {
-          plan = { endpoint: null, answer: raw };
+          abResult = await callAgencyBloc(parsed.abAction, parsed.abInput || {});
+        } catch (e) {
+          abResult = { error: e.message };
         }
 
-        if (!plan.endpoint) {
-          const ans = plan.answer || "I couldn't map that to an AgencyBloc query.";
-          addMsg("bot", ans);
-          history.push({ role: "assistant", content: ans });
-          return;
-        }
+        const dataMsg = `AgencyBloc returned this data: ${JSON.stringify(abResult, null, 2)}\n\nPlease summarize this clearly and concisely for the user in plain text. No markdown, no bullet symbols.`;
+        history.push({ role: "user", content: dataMsg });
 
-        addMsg("bot", `Querying AgencyBloc${plan.endpoint}...`);
-        const abData = await abPost(plan.endpoint, plan.params || {});
-
-        if (abData.raw) {
-          addMsg("error", "Unexpected response:\n" + abData.raw.substring(0, 500));
-          return;
-        }
-
-        const sumData = await claudeCall({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 800,
-          messages: [{
-            role: "user",
-            content: `The user asked: "${q}"\n\nAgencyBloc returned:\n${JSON.stringify(abData, null, 2).substring(0, 4000)}\n\nSummarize this clearly and concisely for a benefits account manager. Use plain English, no JSON.`
-          }]
-        });
-
-        const answer = sumData.content?.[0]?.text || JSON.stringify(abData, null, 2);
-
-        // Remove interim "Querying..." message
-        const chat = document.getElementById("chat");
-        chat.removeChild(chat.lastChild);
-
-        addMsg("bot", answer);
-        history.push({ role: "assistant", content: answer });
-
-      } catch (e) {
-        addMsg("error", "Error: " + e.message);
-      } finally {
-        document.getElementById("sendBtn").disabled = false;
+        reply = await callClaude(history);
+        history.push({ role: "assistant", content: reply });
+      } else {
+        history.push({ role: "assistant", content: reply });
       }
+
+      removeTyping();
+      addMsg("bot", reply);
+
+    } catch (e) {
+      removeTyping();
+      addMsg("error", "Error: " + e.message);
     }
 
-    function addMsg(type, text) {
-      const chat = document.getElementById("chat");
-      const div  = document.createElement("div");
-      div.className = "msg " + (type === "user" ? "user" : type === "error" ? "bot error" : "bot");
-      div.textContent = text;
-      chat.appendChild(div);
-      chat.scrollTop = chat.scrollHeight;
-    }
-  </script>
+    btn.disabled = false;
+    inputEl.focus();
+  }
+
+  // Welcome message
+  addMsg("bot", "Hi! I can look up clients, groups, policies, activities, and notes from AgencyBloc. What do you need?");
+</script>
 </body>
 </html>

@@ -59,13 +59,19 @@ let history = [];
 
 const SYSTEM = `You are Birch Assistant for Birch Benefits LLC, connected to AgencyBloc AMS.
 
-CRITICAL RULE: When you need to fetch data, your ENTIRE response must be ONLY a JSON object. Nothing before it, nothing after it. Not even one word of explanation. Just the raw JSON.
+CRITICAL RULE: When you need to fetch data, your ENTIRE response must be ONLY a JSON object. Nothing before it, nothing after it. Not even one word. Just raw JSON.
 
-Correct example:
-{"abAction":"groups-search","abInput":{"groupName":"Aclaris"}}
+Correct: {"abAction":"groups-search","abInput":{"groupName":"Aclaris"}}
+Wrong: I found the group. {"abAction":"activities-list","abInput":{"entityID":1674107,"entityTypeID":1}}
 
-Wrong example:
-I found the group. {"abAction":"activities-list","abInput":{"entityID":1674107,"entityTypeID":1}}
+You work in steps. Each response is either:
+1. A JSON action to fetch data (ONLY JSON, nothing else)
+2. A plain text summary when you have enough data to answer
+
+Multi-step example for "list activities for Aclaris":
+Step 1 - you output ONLY: {"abAction":"groups-search","abInput":{"groupName":"Aclaris"}}
+Step 2 - after getting the groupID from results, you output ONLY: {"abAction":"activities-list","abInput":{"entityID":1674107,"entityTypeID":1}}
+Step 3 - after getting activities, you summarize in plain text
 
 Available actions:
 - all-groups: no input needed
@@ -82,10 +88,10 @@ Available actions:
 - client-snapshot: required groupID
 
 Rules:
-- If you need a groupID but only have a name, do groups-search first. Output ONLY the JSON, no other text.
-- Never guess at IDs, always look them up.
-- For "how many clients" use all-groups.
-- When summarizing results, use plain conversational text. No markdown, no bullets, no dashes.`;
+- NEVER guess or assume an ID. Always do a search first to get the real ID.
+- If you output activities-list or notes-list without first doing a search in this conversation, you are wrong.
+- Only summarize when you have real data to present.
+- Summaries must be plain conversational text. No markdown, no bullets, no dashes.`;
 
 function useChip(el) {
   document.getElementById("input").value = el.textContent;
@@ -140,12 +146,15 @@ async function callClaude(msgs) {
 }
 
 async function callAB(action, input) {
+  console.log("AB REQUEST:", action, JSON.stringify(input));
   const resp = await fetch(`${BASE}/agencybloc?action=${encodeURIComponent(action)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input || {})
   });
   const text = await resp.text();
+  console.log("AB STATUS:", resp.status);
+  console.log("AB RAW:", text.substring(0, 300));
   let json;
   try { json = JSON.parse(text); } catch { json = { raw: text }; }
   if (!resp.ok) throw new Error("AgencyBloc " + resp.status + ": " + JSON.stringify(json));
@@ -176,8 +185,11 @@ async function send() {
   try {
     let reply = await callClaude(history);
     let action = parseAction(reply);
+    let loopCount = 0;
 
-    if (action) {
+    // Multi-step loop — keep executing actions until Claude gives a plain text answer
+    while (action && loopCount < 5) {
+      console.log("Loop", loopCount, "executing:", action.abAction);
       history.push({ role: "assistant", content: reply });
 
       let abData;
@@ -191,14 +203,15 @@ async function send() {
         return;
       }
 
-      const dataMsg = "AgencyBloc returned: " + JSON.stringify(abData, null, 2) + "\n\nSummarize this for the user in plain conversational text. No markdown, no bullets, no dashes.";
-      history.push({ role: "user", content: dataMsg });
+      // Feed result back to Claude — no summarization prompt, let Claude decide next step
+      history.push({ role: "user", content: "AgencyBloc returned: " + JSON.stringify(abData, null, 2) });
       reply = await callClaude(history);
-      history.push({ role: "assistant", content: reply });
-    } else {
-      history.push({ role: "assistant", content: reply });
+      action = parseAction(reply);
+      loopCount++;
     }
 
+    // Claude returned plain text — show it
+    history.push({ role: "assistant", content: reply });
     removeTyping();
     addMsg("bot", reply);
 

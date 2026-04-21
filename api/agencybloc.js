@@ -1,228 +1,235 @@
-// api/agencybloc.js
-// Full AgencyBloc handler — all 13 actions
-// debug-env, simplifyGroup on all-groups, lowercase sid/key throughout
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Birch – AgencyBloc Assistant</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #f0f2f0; display: flex; flex-direction: column; height: 100vh; }
+    header { background: #fff; border-bottom: 1px solid #e0e0e0; padding: 14px 20px; display: flex; align-items: center; gap: 10px; }
+    .header-dot { width: 10px; height: 10px; border-radius: 50%; background: #8EC859; }
+    header h1 { font-size: 15px; font-weight: 600; color: #1a1a1a; }
+    header span { font-size: 12px; color: #888; margin-left: auto; }
+    #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+    .msg-wrap { display: flex; flex-direction: column; gap: 3px; }
+    .msg-wrap.user { align-items: flex-end; }
+    .msg-wrap.bot { align-items: flex-start; }
+    .msg-label { font-size: 11px; color: #999; padding: 0 4px; }
+    .msg { max-width: 78%; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+    .msg.user { background: #8EC859; color: #1a3a00; border-bottom-right-radius: 4px; }
+    .msg.bot { background: #fff; border: 1px solid #e5e5e5; color: #1a1a1a; border-bottom-left-radius: 4px; }
+    .msg.error { background: #fff0f0; border-color: #ffcccc; color: #c00; }
+    #chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 20px 12px; }
+    .chip { font-size: 12px; padding: 6px 12px; border-radius: 20px; border: 1px solid #d0d0d0; background: #fff; color: #555; cursor: pointer; }
+    .chip:hover { background: #f5f5f5; color: #1a1a1a; }
+    footer { padding: 12px 16px; background: #fff; border-top: 1px solid #e0e0e0; display: flex; gap: 8px; }
+    #input { flex: 1; padding: 10px 14px; border: 1px solid #ccc; border-radius: 8px; font-size: 14px; outline: none; background: #fafafa; }
+    #input:focus { border-color: #8EC859; background: #fff; }
+    #sendBtn { background: #8EC859; color: #1a3a00; border: none; border-radius: 8px; padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    #sendBtn:disabled { opacity: 0.5; cursor: default; }
+    .typing { display: flex; gap: 4px; align-items: center; padding: 12px 14px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #aaa; animation: bounce 1.2s infinite; }
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-5px)} }
+  </style>
+</head>
+<body>
+<header>
+  <div class="header-dot"></div>
+  <h1>Birch — AgencyBloc Assistant</h1>
+  <span>birch-proxy-qtou.vercel.app</span>
+</header>
+<div id="chat"></div>
+<div id="chips">
+  <span class="chip" onclick="useChip(this)">How many clients do we have?</span>
+  <span class="chip" onclick="useChip(this)">Search for a group by name</span>
+  <span class="chip" onclick="useChip(this)">List activities for a client</span>
+  <span class="chip" onclick="useChip(this)">Get policy details</span>
+  <span class="chip" onclick="useChip(this)">Find notes on an account</span>
+</div>
+<footer>
+  <input id="input" placeholder="Ask about a client, group, policy, or activity..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send();}" />
+  <button id="sendBtn" onclick="send()">Send</button>
+</footer>
+<script>
+const BASE = "https://birch-proxy-qtou.vercel.app/api";
+let history = [];
 
-export default async function handler(req, res) {
+const SYSTEM = `You are Birch Assistant for Birch Benefits LLC, connected to AgencyBloc AMS.
 
-  // Debug: confirm env vars are present (GET /api/agencybloc?action=debug-env)
-  if (req.query?.action === "debug-env") {
-    return res.status(200).json({
-      hasSid: !!process.env.AGENCYBLOC_SID,
-      hasKey: !!process.env.AGENCYBLOC_KEY,
-    });
-  }
+CRITICAL RULE: When you need to fetch data, your ENTIRE response must be ONLY a JSON object. Nothing before it, nothing after it. Not even one word. Just raw JSON.
 
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
+Correct: {"abAction":"groups-search","abInput":{"groupName":"Aclaris"}}
+Wrong: I found the group. {"abAction":"activities-list","abInput":{"entityID":1674107,"entityTypeID":"Group"}}
 
-  const sid = process.env.AGENCYBLOC_SID;
-  const key = process.env.AGENCYBLOC_KEY;
-  if (!sid || !key) return res.status(500).json({ error: "Missing AgencyBloc credentials" });
+You work in steps. Each response is either:
+1. A JSON action to fetch data (ONLY JSON, nothing else)
+2. A plain text summary when you have enough data to answer
 
-  // Support both query param (?action=) and path-based routing (/api/agencybloc/group-detail)
-  const urlPath = req.url || "";
-  const pathAction = urlPath.split("/api/agencybloc/")[1]?.split("?")[0];
-  const action = pathAction || req.query.action;
-  const input = req.body || {};
+Multi-step example for "list activities for Aclaris":
+Step 1 - output ONLY: {"abAction":"groups-search","abInput":{"groupName":"Aclaris"}}
+Step 2 - after getting groupID from results, output ONLY: {"abAction":"activities-list","abInput":{"entityID":1674107,"entityTypeID":"Group"}}
+Step 3 - after getting activities, summarize in plain text
 
-  // Core AgencyBloc fetch helper — always lowercase sid/key
-  const ab = async (endpoint, params = {}) => {
-    const body = new URLSearchParams({ sid, key, ...params });
-    const r = await fetch(`https://app.agencybloc.com/api/v1/${endpoint}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString()
-    });
-    const text = await r.text();
-    try { return JSON.parse(text); }
-    catch { return { error: "Invalid JSON from AgencyBloc", raw: text }; }
-  };
+Available actions:
+- all-groups: no input needed
+- groups-search: optional groupName, type, fedTaxID
+- groups-detail: required groupID
+- individuals-search: optional firstName, lastName, email, groupID
+- individuals-detail: required individualID
+- policies-search: optional policyNumber, carrier, entityID, entityTypeID
+- policies-detail: required policyID
+- agents-search: optional firstName, lastName, email
+- carriers-search: optional carrierName
+- activities-list: required entityID (the numeric ID) and entityTypeID as a STRING — must be exactly "Group", "Individual", "Agent", "Carrier", or "Lead". NEVER use a number for entityTypeID.
+- notes-list: required entity_ID (numeric) and entity_Type as a STRING — must be exactly "Group" or "Individual". NEVER use a number.
+- client-snapshot: required groupID — returns group detail plus notes together
 
-  // Simplified group shape for list views
-  const simplifyGroup = (g) => ({
-    groupId: g.groupID || "",
-    groupName: g.groupName || "",
-    type: g.type || "",
-    status: g.status || "",
-    businessPhone: g.businessPhone || "",
-    fedTaxID: g.fedTaxID || "",
-    detailUrl: g.detail_url || ""
-  });
+Rules:
+- NEVER guess or assume an ID. Always do a search first to get the real ID.
+- NEVER output activities-list or notes-list without first doing a search in this conversation.
+- entityTypeID and entity_Type must always be strings like "Group", never numbers like 1.
+- Only summarize when you have real data to present.
+- Summaries must be plain conversational text. No markdown, no bullets, no dashes.`;
 
-  try {
-    switch (action) {
-
-      // ── GROUPS ──────────────────────────────────────────────
-      case "groups-search": {
-        const params = { limit: 0 };
-        if (input.groupName) params.groupName = input.groupName;
-        if (input.type) params.type = input.type;
-        if (input.fedTaxID) params.fedTaxID = input.fedTaxID;
-        if (input.businessPhone) params.businessPhone = input.businessPhone;
-        return res.json(await ab("groups/search", params));
-      }
-
-      case "groups-detail": {
-        if (!input.groupID) return res.status(400).json({ error: "groupID required" });
-        return res.json(await ab("groups/detail", {
-          groupID: input.groupID,
-          includeActivities: 1
-        }));
-      }
-
-      // ── INDIVIDUALS ─────────────────────────────────────────
-      case "individuals-search": {
-        const params = { limit: 0 };
-        if (input.firstName) params.firstName = input.firstName;
-        if (input.lastName) params.lastName = input.lastName;
-        if (input.email) params.email = input.email;
-        if (input.groupID) params.groupID = input.groupID;
-        if (input.anyPhone) params.anyPhone = input.anyPhone;
-        return res.json(await ab("individuals/search", params));
-      }
-
-      case "individuals-detail": {
-        if (!input.individualID) return res.status(400).json({ error: "individualID required" });
-        return res.json(await ab("individuals/detail", {
-          individualID: input.individualID,
-          includeActivities: 1
-        }));
-      }
-
-      // ── POLICIES ────────────────────────────────────────────
-      case "policies-search": {
-        const params = { limit: 0 };
-        if (input.policyNumber) params.policyNumber = input.policyNumber;
-        if (input.policyCoverageType) params.policyCoverageType = input.policyCoverageType;
-        if (input.carrier) params.carrier = input.carrier;
-        if (input.entityID) params.entityID = input.entityID;
-        if (input.entityTypeID) params.entityTypeID = input.entityTypeID;
-        return res.json(await ab("policies/search", params));
-      }
-
-      case "policies-detail": {
-        if (!input.policyID) return res.status(400).json({ error: "policyID required" });
-        return res.json(await ab("policies/detail", { policyID: input.policyID }));
-      }
-
-      // ── AGENTS / PRODUCERS ───────────────────────────────────
-      case "agents-search": {
-        const params = { limit: 0 };
-        if (input.firstName) params.firstName = input.firstName;
-        if (input.lastName) params.lastName = input.lastName;
-        if (input.email) params.email = input.email;
-        return res.json(await ab("agents/search", params));
-      }
-
-      case "agents-detail": {
-        if (!input.agentID) return res.status(400).json({ error: "agentID required" });
-        return res.json(await ab("agents/detail", {
-          agentID: input.agentID,
-          includeActivities: 1
-        }));
-      }
-
-      // ── CARRIERS ─────────────────────────────────────────────
-      case "carriers-search": {
-        const params = { limit: 0 };
-        if (input.carrierName) params.carrierName = input.carrierName;
-        return res.json(await ab("carriers/search", params));
-      }
-
-      // ── ACTIVITIES ───────────────────────────────────────────
-      case "activities-list": {
-        if (!input.entityID) return res.status(400).json({ error: "entityID required" });
-        if (!input.entityTypeID) return res.status(400).json({ error: "entityTypeID required" });
-        return res.json(await ab("activities/list", {
-          entityID: input.entityID,
-          entityTypeID: input.entityTypeID
-        }));
-      }
-
-      // ── NOTES & ATTACHMENTS ──────────────────────────────────
-      case "notes-list": {
-        if (!input.entity_ID) return res.status(400).json({ error: "entity_ID required" });
-        if (!input.entity_Type) return res.status(400).json({ error: "entity_Type required" });
-        return res.json(await ab("notes/list", {
-          entity_ID: input.entity_ID,
-          entity_Type: input.entity_Type
-        }));
-      }
-
-      // ── LEADS / SALES RECORDS ────────────────────────────────
-      case "leads-detail": {
-        if (!input.record_id) return res.status(400).json({ error: "record_id required" });
-        return res.json(await ab("salesEnablement/Leads/detail", {
-          record_id: input.record_id
-        }));
-      }
-
-      case "leads-search-phone": {
-        if (!input.PhoneNumberSearchQuery) return res.status(400).json({ error: "PhoneNumberSearchQuery required" });
-        return res.json(await ab("salesEnablement/leads/searchphone", {
-          PhoneNumberSearchQuery: input.PhoneNumberSearchQuery
-        }));
-      }
-
-      // ── CONVENIENCE ACTIONS ──────────────────────────────────
-
-      // Returns simplified group list — filtered to clients only, matching Power BI logic
-      case "all-groups": {
-        const groups = await ab("groups/search", { limit: 0 });
-        if (!Array.isArray(groups)) return res.json(groups);
-        const clients = groups.filter(g => {
-          const type = (g.type || "").toLowerCase();
-          const name = (g.groupName || "").toLowerCase();
-          return (
-            type.includes("client") ||
-            type.includes("peo") ||
-            type === "group" ||
-            type === "business" ||
-            type === "company" ||
-            type.includes("llc") ||
-            type.includes("corp") ||
-            type.includes("inc") ||
-            name.includes("evans") ||
-            name.includes("careoperative")
-          ) && !type.includes("prospect");
-        });
-        return res.json({ count: clients.length, groups: clients.map(simplifyGroup) });
-      }
-
-      // Returns full group detail + notes in one call
-      case "client-snapshot": {
-        if (!input.groupID) return res.status(400).json({ error: "groupID required" });
-        const [detail, notes] = await Promise.all([
-          ab("groups/detail", { groupID: input.groupID, includeActivities: 1 }),
-          ab("notes/list", { entity_ID: input.groupID, entity_Type: "Group" })
-        ]);
-        return res.json({ detail, notes });
-      }
-
-      default:
-        return res.status(400).json({
-          error: `Unknown action: ${action}`,
-          availableActions: [
-            "groups-search", "groups-detail",
-            "individuals-search", "individuals-detail",
-            "policies-search", "policies-detail",
-            "agents-search", "agents-detail",
-            "carriers-search",
-            "activities-list",
-            "notes-list",
-            "leads-detail", "leads-search-phone",
-            "all-groups", "client-snapshot"
-          ]
-        });
-    }
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
+function useChip(el) {
+  document.getElementById("input").value = el.textContent;
+  document.getElementById("input").focus();
 }
 
-export const config = {
-  api: { bodyParser: { sizeLimit: "2mb" } }
-};
+function addMsg(type, text) {
+  const chat = document.getElementById("chat");
+  const wrap = document.createElement("div");
+  wrap.className = "msg-wrap " + (type === "user" ? "user" : "bot");
+  const label = document.createElement("div");
+  label.className = "msg-label";
+  label.textContent = type === "user" ? "You" : "Birch Assistant";
+  const msg = document.createElement("div");
+  msg.className = "msg " + (type === "user" ? "user" : type === "error" ? "bot error" : "bot");
+  msg.textContent = text;
+  wrap.appendChild(label);
+  wrap.appendChild(msg);
+  chat.appendChild(wrap);
+  chat.scrollTop = chat.scrollHeight;
+  return wrap;
+}
+
+function showTyping() {
+  const chat = document.getElementById("chat");
+  const wrap = document.createElement("div");
+  wrap.className = "msg-wrap bot";
+  wrap.id = "typing";
+  const msg = document.createElement("div");
+  msg.className = "msg bot typing";
+  msg.innerHTML = "<div class='dot'></div><div class='dot'></div><div class='dot'></div>";
+  wrap.appendChild(msg);
+  chat.appendChild(wrap);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function removeTyping() {
+  const t = document.getElementById("typing");
+  if (t) t.remove();
+}
+
+async function callClaude(msgs) {
+  const resp = await fetch(`${BASE}/claude`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "claude-sonnet-4-5", max_tokens: 1000, system: SYSTEM, messages: msgs })
+  });
+  if (!resp.ok) throw new Error("Claude API error " + resp.status);
+  const data = await resp.json();
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+  return data.content?.[0]?.text || "";
+}
+
+async function callAB(action, input) {
+  console.log("AB REQUEST:", action, JSON.stringify(input));
+  const resp = await fetch(`${BASE}/agencybloc?action=${encodeURIComponent(action)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input || {})
+  });
+  const text = await resp.text();
+  console.log("AB STATUS:", resp.status);
+  console.log("AB RAW:", text.substring(0, 500));
+  let json;
+  try { json = JSON.parse(text); } catch { json = { raw: text }; }
+  if (!resp.ok) throw new Error("AgencyBloc " + resp.status + ": " + JSON.stringify(json));
+  return json;
+}
+
+function parseAction(text) {
+  console.log("RAW REPLY:", text);
+  try {
+    let cleaned = text.trim().replace(/^```json\n?/i, "").replace(/```$/, "").trim();
+    let parsed = JSON.parse(cleaned);
+    if (typeof parsed === "string") parsed = JSON.parse(parsed);
+    if (parsed && parsed.abAction) {
+      console.log("ACTION:", parsed.abAction, JSON.stringify(parsed.abInput));
+      return parsed;
+    }
+  } catch (e) {
+    console.log("parseAction failed:", e.message);
+  }
+  return null;
+}
+
+async function send() {
+  const inputEl = document.getElementById("input");
+  const btn = document.getElementById("sendBtn");
+  const text = inputEl.value.trim();
+  if (!text) return;
+
+  inputEl.value = "";
+  btn.disabled = true;
+  addMsg("user", text);
+  history.push({ role: "user", content: text });
+  showTyping();
+
+  try {
+    let reply = await callClaude(history);
+    let action = parseAction(reply);
+    let loopCount = 0;
+
+    while (action && loopCount < 5) {
+      console.log("Loop", loopCount, "action:", action.abAction);
+      history.push({ role: "assistant", content: reply });
+
+      let abData;
+      try {
+        abData = await callAB(action.abAction, action.abInput || {});
+      } catch (e) {
+        removeTyping();
+        addMsg("error", e.message);
+        btn.disabled = false;
+        inputEl.focus();
+        return;
+      }
+
+      history.push({ role: "user", content: "AgencyBloc returned: " + JSON.stringify(abData, null, 2) });
+      reply = await callClaude(history);
+      action = parseAction(reply);
+      loopCount++;
+    }
+
+    history.push({ role: "assistant", content: reply });
+    removeTyping();
+    addMsg("bot", reply);
+
+  } catch (e) {
+    removeTyping();
+    addMsg("error", "Error: " + e.message);
+  }
+
+  btn.disabled = false;
+  inputEl.focus();
+}
+
+addMsg("bot", "Hi! I can look up clients, groups, policies, activities, and notes from AgencyBloc. What do you need?");
+</script>
+</body>
+</html>

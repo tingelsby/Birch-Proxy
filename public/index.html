@@ -62,16 +62,16 @@ const SYSTEM = `You are Birch Assistant for Birch Benefits LLC, connected to Age
 CRITICAL RULE: When you need to fetch data, your ENTIRE response must be ONLY a JSON object. Nothing before it, nothing after it. Not even one word. Just raw JSON.
 
 Correct: {"abAction":"groups-search","abInput":{"groupName":"Aclaris"}}
-Wrong: I found the group. {"abAction":"activities-list","abInput":{"entityID":1674107,"entityTypeID":1}}
+Wrong: I found the group. {"abAction":"activities-list","abInput":{"entityID":1674107,"entityTypeID":"Group"}}
 
 You work in steps. Each response is either:
 1. A JSON action to fetch data (ONLY JSON, nothing else)
 2. A plain text summary when you have enough data to answer
 
 Multi-step example for "list activities for Aclaris":
-Step 1 - you output ONLY: {"abAction":"groups-search","abInput":{"groupName":"Aclaris"}}
-Step 2 - after getting the groupID from results, you output ONLY: {"abAction":"activities-list","abInput":{"entityID":1674107,"entityTypeID":1}}
-Step 3 - after getting activities, you summarize in plain text
+Step 1 - output ONLY: {"abAction":"groups-search","abInput":{"groupName":"Aclaris"}}
+Step 2 - after getting groupID from results, output ONLY: {"abAction":"activities-list","abInput":{"entityID":1674107,"entityTypeID":"Group"}}
+Step 3 - after getting activities, summarize in plain text
 
 Available actions:
 - all-groups: no input needed
@@ -83,13 +83,14 @@ Available actions:
 - policies-detail: required policyID
 - agents-search: optional firstName, lastName, email
 - carriers-search: optional carrierName
-- activities-list: required entityID and entityTypeID (1=group, 2=individual)
-- notes-list: required entity_ID and entity_Type ("Group" or "Individual")
-- client-snapshot: required groupID
+- activities-list: required entityID (numeric) and entityTypeID as a STRING — must be exactly "Group", "Individual", "Agent", "Carrier", or "Lead". NEVER use a number.
+- notes-list: required entity_ID (numeric) and entity_Type as a STRING — must be exactly "Group" or "Individual". NEVER use a number.
+- client-snapshot: required groupID — returns group detail plus notes together
 
 Rules:
 - NEVER guess or assume an ID. Always do a search first to get the real ID.
 - NEVER output activities-list or notes-list without first doing a search in this conversation.
+- entityTypeID and entity_Type must always be strings like "Group", never numbers like 1.
 - Only summarize when you have real data to present.
 - Summaries must be plain conversational text. No markdown, no bullets, no dashes.`;
 
@@ -147,10 +148,11 @@ async function callClaude(msgs) {
 
 async function callAB(action, input) {
   console.log("AB REQUEST:", action, JSON.stringify(input));
+  // Send action in BOTH query string and body to ensure agencybloc.js picks it up
   const resp = await fetch(`${BASE}/agencybloc?action=${encodeURIComponent(action)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input || {})
+    body: JSON.stringify({ action, ...( input || {}) })
   });
   const text = await resp.text();
   console.log("AB STATUS:", resp.status);
@@ -162,34 +164,18 @@ async function callAB(action, input) {
 }
 
 function parseAction(text) {
-  console.log("RAW CLAUDE REPLY:", text);
-  console.log("REPLY TYPE:", typeof text);
-
+  console.log("RAW REPLY:", text);
   try {
-    // Strip markdown code fences if present
-    let cleaned = text.trim().replace(/^```json\n?/i, "").replace(/```$/,"").trim();
-    console.log("CLEANED:", cleaned);
-
-    // First parse
+    let cleaned = text.trim().replace(/^```json\n?/i, "").replace(/```$/, "").trim();
     let parsed = JSON.parse(cleaned);
-
-    // Handle double-encoded JSON (string inside string)
-    if (typeof parsed === "string") {
-      console.log("Double-encoded, parsing again");
-      parsed = JSON.parse(parsed);
-    }
-
-    console.log("PARSED:", JSON.stringify(parsed));
-
+    if (typeof parsed === "string") parsed = JSON.parse(parsed);
     if (parsed && parsed.abAction) {
-      console.log("ACTION FOUND:", parsed.abAction);
+      console.log("ACTION:", parsed.abAction, JSON.stringify(parsed.abInput));
       return parsed;
     }
   } catch (e) {
     console.log("parseAction failed:", e.message);
   }
-
-  console.log("No action found, treating as plain text");
   return null;
 }
 
@@ -211,7 +197,7 @@ async function send() {
     let loopCount = 0;
 
     while (action && loopCount < 5) {
-      console.log("Loop", loopCount, "executing:", action.abAction);
+      console.log("Loop", loopCount, "action:", action.abAction);
       history.push({ role: "assistant", content: reply });
 
       let abData;

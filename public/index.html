@@ -57,13 +57,18 @@
 const BASE = "https://birch-proxy-qtou.vercel.app/api";
 let history = [];
 
-const SYSTEM = `You are Birch Assistant, an AI for Birch Benefits LLC connected to AgencyBloc AMS.
+const SYSTEM = `You are Birch Assistant for Birch Benefits LLC, connected to AgencyBloc AMS.
 
-When you need AgencyBloc data, respond with ONLY a raw JSON object (no markdown, no extra text) like:
+CRITICAL RULE: When you need to fetch data, your ENTIRE response must be ONLY a JSON object. Nothing before it, nothing after it. Not even one word of explanation. Just the raw JSON.
+
+Correct example:
 {"abAction":"groups-search","abInput":{"groupName":"Aclaris"}}
 
+Wrong example:
+I found the group. {"abAction":"activities-list","abInput":{"entityID":1674107,"entityTypeID":1}}
+
 Available actions:
-- all-groups: no input needed, returns full client list with count
+- all-groups: no input needed
 - groups-search: optional groupName, type, fedTaxID
 - groups-detail: required groupID
 - individuals-search: optional firstName, lastName, email, groupID
@@ -74,14 +79,13 @@ Available actions:
 - carriers-search: optional carrierName
 - activities-list: required entityID and entityTypeID (1=group, 2=individual)
 - notes-list: required entity_ID and entity_Type ("Group" or "Individual")
-- client-snapshot: required groupID, returns group detail plus notes together
+- client-snapshot: required groupID
 
 Rules:
-- Respond with ONLY the JSON when you need data. No intro text before the JSON.
-- If you need a groupID but only have a name, do groups-search first.
+- If you need a groupID but only have a name, do groups-search first. Output ONLY the JSON, no other text.
 - Never guess at IDs, always look them up.
 - For "how many clients" use all-groups.
-- When you receive results, summarize in plain conversational text. No markdown, no bullet symbols, no dashes.`;
+- When summarizing results, use plain conversational text. No markdown, no bullets, no dashes.`;
 
 function useChip(el) {
   document.getElementById("input").value = el.textContent;
@@ -187,7 +191,7 @@ async function send() {
         return;
       }
 
-      const dataMsg = "AgencyBloc returned: " + JSON.stringify(abData, null, 2) + "\n\nSummarize this for the user in plain conversational text. No markdown, no bullet symbols, no dashes.";
+      const dataMsg = "AgencyBloc returned: " + JSON.stringify(abData, null, 2) + "\n\nSummarize this for the user in plain conversational text. No markdown, no bullets, no dashes.";
       history.push({ role: "user", content: dataMsg });
       reply = await callClaude(history);
       history.push({ role: "assistant", content: reply });

@@ -11,6 +11,8 @@
     .header-dot { width: 10px; height: 10px; border-radius: 50%; background: #8EC859; }
     header h1 { font-size: 15px; font-weight: 600; color: #1a1a1a; }
     header span { font-size: 12px; color: #888; margin-left: auto; }
+    #reset-btn { font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid #d0d0d0; background: #fff; color: #555; cursor: pointer; margin-left: 12px; }
+    #reset-btn:hover { background: #f5f5f5; }
     #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
     .msg-wrap { display: flex; flex-direction: column; gap: 3px; }
     .msg-wrap.user { align-items: flex-end; }
@@ -39,14 +41,15 @@
 <header>
   <div class="header-dot"></div>
   <h1>Birch — AgencyBloc Assistant</h1>
-  <span>birch-proxy-qtou.vercel.app</span>
+  <button id="reset-btn" onclick="resetChat()">New conversation</button>
+  <span>birch-proxy-claude.vercel.app</span>
 </header>
 <div id="chat"></div>
 <div id="chips">
   <span class="chip" onclick="useChip(this)">How many clients do we have?</span>
   <span class="chip" onclick="useChip(this)">Search for a group by name</span>
-  <span class="chip" onclick="useChip(this)">List activities for a client</span>
-  <span class="chip" onclick="useChip(this)">Get policy details</span>
+  <span class="chip" onclick="useChip(this)">Get full details for a client</span>
+  <span class="chip" onclick="useChip(this)">What are the policies for a client?</span>
   <span class="chip" onclick="useChip(this)">Find notes on an account</span>
 </div>
 <footer>
@@ -54,7 +57,7 @@
   <button id="sendBtn" onclick="send()">Send</button>
 </footer>
 <script>
-const BASE = "https://birch-proxy-qtou.vercel.app/api";
+const BASE = "https://birch-proxy-claude.vercel.app/api";
 let history = [];
 
 const SYSTEM = `You are Birch Assistant for Birch Benefits LLC, connected to AgencyBloc AMS.
@@ -62,41 +65,43 @@ const SYSTEM = `You are Birch Assistant for Birch Benefits LLC, connected to Age
 CRITICAL RULE: When you need to fetch data, your ENTIRE response must be ONLY a JSON object. Nothing before it, nothing after it. Not even one word. Just raw JSON.
 
 Correct: {"abAction":"groups-search","abInput":{"groupName":"Aclaris"}}
-Wrong: I found the group. {"abAction":"activities-list","abInput":{"entityID":1674107,"entityTypeID":"Group"}}
+Wrong: I found the group. {"abAction":"groups-detail","abInput":{"groupID":1674107}}
 
 You work in steps. Each response is either:
 1. A JSON action to fetch data (ONLY JSON, nothing else)
 2. A plain text summary when you have enough data to answer
 
-Multi-step example for "list activities for Aclaris":
-Step 1 - output ONLY: {"abAction":"groups-search","abInput":{"groupName":"Aclaris"}}
-Step 2 - after getting groupID from results, output ONLY: {"abAction":"activities-list","abInput":{"entityID":1674107,"entityTypeID":"Group"}}
-Step 3 - after getting activities, summarize in plain text
-
 Available actions:
-- all-groups: no input needed
-- groups-search: optional groupName, type, fedTaxID
-- groups-detail: required groupID
+- all-groups: no input needed — returns full client list with count
+- groups-search: optional groupName, type, fedTaxID — use to find a groupID
+- groups-detail: required groupID — returns FULL detail including policies AND activities. Use this for any question about a client's policies, renewals, activities, or account manager.
 - individuals-search: optional firstName, lastName, email, groupID
 - individuals-detail: required individualID
 - policies-search: optional policyNumber, carrier, entityID, entityTypeID
 - policies-detail: required policyID
 - agents-search: optional firstName, lastName, email
 - carriers-search: optional carrierName
-- activities-list: required entityID (numeric) and entityTypeID as a STRING — must be exactly "Group", "Individual", "Agent", "Carrier", or "Lead". NEVER use a number.
-- notes-list: required entity_ID (numeric) and entity_Type as a STRING — must be exactly "Group" or "Individual". NEVER use a number.
+- notes-list: required entity_ID (numeric) and entity_Type as "Group" or "Individual"
 - client-snapshot: required groupID — returns group detail plus notes together
 
 Rules:
-- NEVER guess or assume an ID. Always do a search first to get the real ID.
-- NEVER output activities-list or notes-list without first doing a search in this conversation.
-- entityTypeID and entity_Type must always be strings like "Group", never numbers like 1.
+- NEVER guess or assume an ID. Always do groups-search first to get the real groupID.
+- For ANY question about a client's activities, renewals, policies, or account manager — use groups-detail with the groupID. It returns everything.
+- Do NOT use activities-list — use groups-detail instead.
 - Only summarize when you have real data to present.
-- Summaries must be plain conversational text. No markdown, no bullets, no dashes.`;
+- Summaries must be plain conversational text. No markdown symbols, no bullets, no dashes.
+- If the conversation history is getting long, focus only on the current question.`;
 
 function useChip(el) {
   document.getElementById("input").value = el.textContent;
   document.getElementById("input").focus();
+}
+
+function resetChat() {
+  history = [];
+  const chat = document.getElementById("chat");
+  chat.innerHTML = "";
+  addMsg("bot", "Hi! I can look up clients, groups, policies, activities, and notes from AgencyBloc. What do you need?");
 }
 
 function addMsg(type, text) {
@@ -135,10 +140,12 @@ function removeTyping() {
 }
 
 async function callClaude(msgs) {
+  // Keep history to last 10 messages to avoid token limits
+  const trimmed = msgs.slice(-10);
   const resp = await fetch(`${BASE}/claude`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "claude-sonnet-4-5", max_tokens: 1000, system: SYSTEM, messages: msgs })
+    body: JSON.stringify({ model: "claude-sonnet-4-5", max_tokens: 1000, system: SYSTEM, messages: trimmed })
   });
   if (!resp.ok) throw new Error("Claude API error " + resp.status);
   const data = await resp.json();
@@ -147,16 +154,12 @@ async function callClaude(msgs) {
 }
 
 async function callAB(action, input) {
-  console.log("AB REQUEST:", action, JSON.stringify(input));
-  // Send action in BOTH query string and body to ensure agencybloc.js picks it up
   const resp = await fetch(`${BASE}/agencybloc?action=${encodeURIComponent(action)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action, ...( input || {}) })
+    body: JSON.stringify(input || {})
   });
   const text = await resp.text();
-  console.log("AB STATUS:", resp.status);
-  console.log("AB RAW:", text.substring(0, 500));
   let json;
   try { json = JSON.parse(text); } catch { json = { raw: text }; }
   if (!resp.ok) throw new Error("AgencyBloc " + resp.status + ": " + JSON.stringify(json));
@@ -164,18 +167,11 @@ async function callAB(action, input) {
 }
 
 function parseAction(text) {
-  console.log("RAW REPLY:", text);
   try {
-    let cleaned = text.trim().replace(/^```json\n?/i, "").replace(/```$/, "").trim();
-    let parsed = JSON.parse(cleaned);
-    if (typeof parsed === "string") parsed = JSON.parse(parsed);
-    if (parsed && parsed.abAction) {
-      console.log("ACTION:", parsed.abAction, JSON.stringify(parsed.abInput));
-      return parsed;
-    }
-  } catch (e) {
-    console.log("parseAction failed:", e.message);
-  }
+    const cleaned = text.trim().replace(/^```json\n?/i, "").replace(/```$/, "").trim();
+    const parsed = JSON.parse(cleaned);
+    if (parsed && parsed.abAction) return parsed;
+  } catch {}
   return null;
 }
 
@@ -197,7 +193,6 @@ async function send() {
     let loopCount = 0;
 
     while (action && loopCount < 5) {
-      console.log("Loop", loopCount, "action:", action.abAction);
       history.push({ role: "assistant", content: reply });
 
       let abData;

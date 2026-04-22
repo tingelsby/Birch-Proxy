@@ -1,85 +1,58 @@
 // api/agencybloc.js
-// Full AgencyBloc handler — all actions
-// Supports both req.query.action and req.body.action
-// Normalizes entityTypeID string → number for AgencyBloc
+// Full AgencyBloc handler — all 13 actions
+// debug-env, simplifyGroup on all-groups, lowercase sid/key throughout
 
 export default async function handler(req, res) {
 
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
   // Debug: confirm env vars are present (GET /api/agencybloc?action=debug-env)
-  if (req.method === "GET" && req.query?.action === "debug-env") {
+  if (req.query?.action === "debug-env") {
     return res.status(200).json({
       hasSid: !!process.env.AGENCYBLOC_SID,
       hasKey: !!process.env.AGENCYBLOC_KEY,
     });
   }
 
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
 
-  try {
-    console.log("=== AGENCYBLOC REQUEST ===");
-    console.log("query:", JSON.stringify(req.query || {}));
-    console.log("body:", JSON.stringify(req.body || {}));
+  const sid = process.env.AGENCYBLOC_SID;
+  const key = process.env.AGENCYBLOC_KEY;
+  if (!sid || !key) return res.status(500).json({ error: "Missing AgencyBloc credentials" });
 
-    const sid = process.env.AGENCYBLOC_SID;
-    const key = process.env.AGENCYBLOC_KEY;
-    if (!sid || !key) return res.status(500).json({ error: "Missing AgencyBloc credentials" });
+  // Support both query param (?action=) and path-based routing (/api/agencybloc/group-detail)
+  const urlPath = req.url || "";
+  const pathAction = urlPath.split("/api/agencybloc/")[1]?.split("?")[0];
+  const action = pathAction || req.query.action;
+  const input = req.body || {};
 
-    // Support action from query string OR body
-    const urlPath = req.url || "";
-    const pathAction = urlPath.split("/api/agencybloc/")[1]?.split("?")[0];
-    const action = pathAction || req.query.action || req.body?.action;
-    const input = req.body || {};
-
-    console.log("resolved action:", action);
-    console.log("resolved input:", JSON.stringify(input));
-
-    // Normalize entityTypeID from string to number for AgencyBloc
-    function normalizeEntityType(type) {
-      if (type === "Group") return 1;
-      if (type === "Individual") return 2;
-      if (type === "Agent") return 3;
-      if (type === "Carrier") return 4;
-      if (type === "Lead") return 5;
-      return type;
-    }
-
-    // Core AgencyBloc fetch helper
-    const ab = async (endpoint, params = {}) => {
-      // Normalize entityTypeID if present
-      if (params.entityTypeID) {
-        params.entityTypeID = normalizeEntityType(params.entityTypeID);
-      }
-      const body = new URLSearchParams({ sid, key, ...params });
-      console.log("AB TARGET:", `https://app.agencybloc.com/api/v1/${endpoint}`);
-      console.log("AB BODY:", body.toString());
-      const r = await fetch(`https://app.agencybloc.com/api/v1/${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: body.toString()
-      });
-      const text = await r.text();
-      console.log("AB STATUS:", r.status);
-      console.log("AB RESPONSE:", text.substring(0, 500));
-      try { return JSON.parse(text); }
-      catch { return { error: "Invalid JSON from AgencyBloc", raw: text }; }
-    };
-
-    // Simplified group shape for list views
-    const simplifyGroup = (g) => ({
-      groupId: g.groupID || "",
-      groupName: g.groupName || "",
-      type: g.type || "",
-      status: g.status || "",
-      businessPhone: g.businessPhone || "",
-      fedTaxID: g.fedTaxID || "",
-      detailUrl: g.detail_url || ""
+  // Core AgencyBloc fetch helper — always lowercase sid/key
+  const ab = async (endpoint, params = {}) => {
+    const body = new URLSearchParams({ sid, key, ...params });
+    const r = await fetch(`https://app.agencybloc.com/api/v1/${endpoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString()
     });
+    const text = await r.text();
+    try { return JSON.parse(text); }
+    catch { return { error: "Invalid JSON from AgencyBloc", raw: text }; }
+  };
 
+  // Simplified group shape for list views
+  const simplifyGroup = (g) => ({
+    groupId: g.groupID || "",
+    groupName: g.groupName || "",
+    type: g.type || "",
+    status: g.status || "",
+    businessPhone: g.businessPhone || "",
+    fedTaxID: g.fedTaxID || "",
+    detailUrl: g.detail_url || ""
+  });
+
+  try {
     switch (action) {
 
       // ── GROUPS ──────────────────────────────────────────────
@@ -227,7 +200,6 @@ export default async function handler(req, res) {
       }
 
       default:
-        console.log("Unknown action:", action);
         return res.status(400).json({
           error: `Unknown action: ${action}`,
           availableActions: [
@@ -244,8 +216,7 @@ export default async function handler(req, res) {
         });
     }
   } catch (err) {
-    console.error("AGENCYBLOC FUNCTION ERROR:", err.message, err.stack);
-    return res.status(500).json({ error: err.message, stack: err.stack });
+    return res.status(500).json({ error: err.message });
   }
 }
 

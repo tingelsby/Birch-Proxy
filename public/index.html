@@ -4,24 +4,43 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Birch – AgencyBloc Assistant</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, -apple-system, sans-serif; background: #f0f2f0; display: flex; flex-direction: column; height: 100vh; }
     header { background: #fff; border-bottom: 1px solid #e0e0e0; padding: 14px 20px; display: flex; align-items: center; gap: 10px; }
-    .header-dot { width: 10px; height: 10px; border-radius: 50%; background: #8EC859; }
+    .header-dot { width: 10px; height: 10px; border-radius: 50%; background: #8EC859; flex-shrink: 0; }
     header h1 { font-size: 15px; font-weight: 600; color: #1a1a1a; }
-    header span { font-size: 12px; color: #888; margin-left: auto; }
     #reset-btn { font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid #d0d0d0; background: #fff; color: #555; cursor: pointer; margin-left: 12px; }
     #reset-btn:hover { background: #f5f5f5; }
+    header span { font-size: 12px; color: #888; margin-left: auto; }
     #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
     .msg-wrap { display: flex; flex-direction: column; gap: 3px; }
     .msg-wrap.user { align-items: flex-end; }
     .msg-wrap.bot { align-items: flex-start; }
     .msg-label { font-size: 11px; color: #999; padding: 0 4px; }
-    .msg { max-width: 78%; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
-    .msg.user { background: #8EC859; color: #1a3a00; border-bottom-right-radius: 4px; }
+    .msg { max-width: 82%; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.6; }
+    .msg.user { background: #8EC859; color: #1a3a00; border-bottom-right-radius: 4px; white-space: pre-wrap; }
     .msg.bot { background: #fff; border: 1px solid #e5e5e5; color: #1a1a1a; border-bottom-left-radius: 4px; }
-    .msg.error { background: #fff0f0; border-color: #ffcccc; color: #c00; }
+    .msg.error { background: #fff0f0; border-color: #ffcccc; color: #c00; white-space: pre-wrap; }
+    /* Markdown rendering */
+    .msg.bot p { margin-bottom: 8px; }
+    .msg.bot p:last-child { margin-bottom: 0; }
+    .msg.bot strong { font-weight: 600; }
+    .msg.bot em { font-style: italic; }
+    .msg.bot ul, .msg.bot ol { margin: 8px 0 8px 20px; }
+    .msg.bot li { margin-bottom: 4px; }
+    .msg.bot table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 13px; }
+    .msg.bot th { background: #f5f5f5; border: 1px solid #ddd; padding: 7px 10px; text-align: left; font-weight: 600; }
+    .msg.bot td { border: 1px solid #ddd; padding: 7px 10px; }
+    .msg.bot tr:nth-child(even) td { background: #fafafa; }
+    .msg.bot h1, .msg.bot h2, .msg.bot h3 { font-weight: 600; margin: 10px 0 6px; }
+    .msg.bot h1 { font-size: 16px; }
+    .msg.bot h2 { font-size: 15px; }
+    .msg.bot h3 { font-size: 14px; }
+    .msg.bot code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; font-family: monospace; font-size: 12px; }
+    .msg.bot pre { background: #f5f5f5; border-radius: 6px; padding: 10px; overflow-x: auto; margin: 8px 0; }
+    .msg.bot pre code { background: none; padding: 0; }
     #chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 20px 12px; }
     .chip { font-size: 12px; padding: 6px 12px; border-radius: 20px; border: 1px solid #d0d0d0; background: #fff; color: #555; cursor: pointer; }
     .chip:hover { background: #f5f5f5; color: #1a1a1a; }
@@ -62,35 +81,40 @@ let history = [];
 
 const SYSTEM = `You are Birch Assistant for Birch Benefits LLC, connected to AgencyBloc AMS.
 
-CRITICAL RULE: When you need to fetch data, your ENTIRE response must be ONLY a JSON object. Nothing before it, nothing after it. Not even one word. Just raw JSON.
+CRITICAL RULE: When you need to fetch data, your ENTIRE response must be ONLY a valid JSON object. No text before it, no text after it, no code fences, no explanation. Just the raw JSON object and nothing else.
 
-Correct: {"abAction":"groups-search","abInput":{"groupName":"Aclaris"}}
-Wrong: I found the group. {"abAction":"groups-detail","abInput":{"groupID":1674107}}
+Example of CORRECT response when fetching data:
+{"abAction":"groups-search","abInput":{"groupName":"Aclaris"}}
 
-You work in steps. Each response is either:
-1. A JSON action to fetch data (ONLY JSON, nothing else)
-2. A plain text summary when you have enough data to answer
+Example of WRONG response:
+Here let me search for that.
+\`\`\`json
+{"abAction":"groups-search","abInput":{"groupName":"Aclaris"}}
+\`\`\`
+
+You work in steps:
+1. When you need data → respond with ONLY the JSON action, nothing else
+2. When you have data → summarize it clearly for the user
 
 Available actions:
-- all-groups: no input needed — returns full client list with count
-- groups-search: optional groupName, type, fedTaxID — use to find a groupID
-- groups-detail: required groupID — returns FULL detail including policies AND activities. Use this for any question about a client's policies, renewals, activities, or account manager.
+- all-groups: no input — returns full client list with count
+- groups-search: optional groupName, type, fedTaxID — use to find a groupID by name
+- groups-detail: required groupID — returns complete group info including policies AND activities. Use for any question about policies, renewals, activities, account manager, or plan details.
 - individuals-search: optional firstName, lastName, email, groupID
 - individuals-detail: required individualID
 - policies-search: optional policyNumber, carrier, entityID, entityTypeID
 - policies-detail: required policyID
 - agents-search: optional firstName, lastName, email
 - carriers-search: optional carrierName
-- notes-list: required entity_ID (numeric) and entity_Type as "Group" or "Individual"
-- client-snapshot: required groupID — returns group detail plus notes together
+- notes-list: required entity_ID (number) and entity_Type ("Group" or "Individual")
+- client-snapshot: required groupID — returns group detail plus notes in one call
 
 Rules:
-- NEVER guess or assume an ID. Always do groups-search first to get the real groupID.
-- For ANY question about a client's activities, renewals, policies, or account manager — use groups-detail with the groupID. It returns everything.
+- NEVER guess or invent an ID. Always search first to find the real groupID.
+- For ANY question about activities, renewals, policies, or account manager — use groups-detail.
 - Do NOT use activities-list — use groups-detail instead.
-- Only summarize when you have real data to present.
-- Summaries must be plain conversational text. No markdown symbols, no bullets, no dashes.
-- If the conversation history is getting long, focus only on the current question.`;
+- When summarizing results, use markdown formatting: tables for lists of data, bold for key facts, headers to organize long responses.
+- Keep summaries professional and concise.`;
 
 function useChip(el) {
   document.getElementById("input").value = el.textContent;
@@ -99,9 +123,13 @@ function useChip(el) {
 
 function resetChat() {
   history = [];
-  const chat = document.getElementById("chat");
-  chat.innerHTML = "";
+  document.getElementById("chat").innerHTML = "";
   addMsg("bot", "Hi! I can look up clients, groups, policies, activities, and notes from AgencyBloc. What do you need?");
+}
+
+function renderMarkdown(text) {
+  try { return marked.parse(text); }
+  catch { return text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 }
 
 function addMsg(type, text) {
@@ -113,7 +141,11 @@ function addMsg(type, text) {
   label.textContent = type === "user" ? "You" : "Birch Assistant";
   const msg = document.createElement("div");
   msg.className = "msg " + (type === "user" ? "user" : type === "error" ? "bot error" : "bot");
-  msg.textContent = text;
+  if (type === "bot") {
+    msg.innerHTML = renderMarkdown(text);
+  } else {
+    msg.textContent = text;
+  }
   wrap.appendChild(label);
   wrap.appendChild(msg);
   chat.appendChild(wrap);
@@ -126,10 +158,10 @@ function showTyping() {
   const wrap = document.createElement("div");
   wrap.className = "msg-wrap bot";
   wrap.id = "typing";
-  const msg = document.createElement("div");
-  msg.className = "msg bot typing";
-  msg.innerHTML = "<div class='dot'></div><div class='dot'></div><div class='dot'></div>";
-  wrap.appendChild(msg);
+  const bubble = document.createElement("div");
+  bubble.className = "msg bot typing";
+  bubble.innerHTML = "<div class='dot'></div><div class='dot'></div><div class='dot'></div>";
+  wrap.appendChild(bubble);
   chat.appendChild(wrap);
   chat.scrollTop = chat.scrollHeight;
 }
@@ -140,12 +172,11 @@ function removeTyping() {
 }
 
 async function callClaude(msgs) {
-  // Keep history to last 10 messages to avoid token limits
   const trimmed = msgs.slice(-10);
   const resp = await fetch(`${BASE}/claude`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "claude-sonnet-4-5", max_tokens: 1000, system: SYSTEM, messages: trimmed })
+    body: JSON.stringify({ model: "claude-sonnet-4-5", max_tokens: 1500, system: SYSTEM, messages: trimmed })
   });
   if (!resp.ok) throw new Error("Claude API error " + resp.status);
   const data = await resp.json();
@@ -168,7 +199,7 @@ async function callAB(action, input) {
 
 function parseAction(text) {
   try {
-    const cleaned = text.trim().replace(/^```json\n?/i, "").replace(/```$/, "").trim();
+    const cleaned = text.trim().replace(/^```json\n?/i, "").replace(/^```\n?/, "").replace(/```$/, "").trim();
     const parsed = JSON.parse(cleaned);
     if (parsed && parsed.abAction) return parsed;
   } catch {}
@@ -194,7 +225,6 @@ async function send() {
 
     while (action && loopCount < 5) {
       history.push({ role: "assistant", content: reply });
-
       let abData;
       try {
         abData = await callAB(action.abAction, action.abInput || {});
@@ -205,7 +235,6 @@ async function send() {
         inputEl.focus();
         return;
       }
-
       history.push({ role: "user", content: "AgencyBloc returned: " + JSON.stringify(abData, null, 2) });
       reply = await callClaude(history);
       action = parseAction(reply);
